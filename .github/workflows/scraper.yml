@@ -1,0 +1,41 @@
+name: Scraper - Вторник и Петък
+
+on:
+  schedule:
+    - cron: "0 5 * * 2"   # Вторник 07:00 ч. Sofia (UTC+2)
+    - cron: "0 5 * * 5"   # Петък   07:00 ч. Sofia (UTC+2)
+  workflow_dispatch:       # Ръчно стартиране от GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout репо
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Инсталиране на библиотеки
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Стартиране на скрейпър
+        env:
+          OLX_EMAIL:    ${{ secrets.OLX_EMAIL }}
+          OLX_PASSWORD: ${{ secrets.OLX_PASSWORD }}
+        run: python scraper.py
+
+      - name: Запазване на CSV в репото
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/properties_varna.csv
+          git diff --cached --quiet || git commit -m "📊 Обяви $(date +'%d.%m.%Y')"
+          git push
