@@ -29,7 +29,7 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run scraper
-        timeout-minutes: 10
+        timeout-minutes: 60
         env:
           OLX_EMAIL: ${{ secrets.OLX_EMAIL }}
           OLX_PASSWORD: ${{ secrets.OLX_PASSWORD }}
