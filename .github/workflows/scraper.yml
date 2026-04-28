@@ -17,12 +17,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Инсталиране на библиотеки
+      - name: Инсталиране на системни зависимости
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libnspr4 libdbus-1-3 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libpangocairo-1.0-0 libcairo2
+
+      - name: Инсталиране на Python библиотеки и Playwright
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          playwright install chromium
-          playwright install-deps chromium
+          playwright install --with-deps chromium
 
       - name: Стартиране на скрейпър
         env:
@@ -33,6 +41,6 @@ jobs:
       - name: Запазване на CSV в репото
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@://github.com"
+          git config user.email "github-actions[bot]@github.com"
           git add data/properties_varna.csv
           git diff --cached --quiet || (git commit -m "📊 Обяви $(date +'%d.%m.%Y')" && git push)
