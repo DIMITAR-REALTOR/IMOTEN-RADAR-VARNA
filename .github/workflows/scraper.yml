@@ -2,27 +2,22 @@ name: Scraper - Вторник и Петък
 
 on:
   schedule:
-    - cron: "0 5 * * 2"   # Вторник 07:00 ч. Sofia (UTC+2)
-    - cron: "0 5 * * 5"   # Петък   07:00 ч. Sofia (UTC+2)
-  workflow_dispatch:       # Ръчно стартиране от GitHub
+    - cron: '0 9 * * 2,5' # Вторник и Петък в 09:00 UTC
+  workflow_dispatch:      # Позволява ръчно стартиране
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-
     steps:
-      - name: Checkout репо
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Инсталиране на библиотеки
-        run: |
-                     - name: Инсталиране на библиотеки
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -38,8 +33,6 @@ jobs:
       - name: Запазване на CSV в репото
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@://github.com"
           git add data/properties_varna.csv
-          git diff --cached --quiet || git commit -m "📊 Обяви $(date +'%d.%m.%Y')"
-          git push
-
+          git diff --cached --quiet || (git commit -m "📊 Обяви $(date +'%d.%m.%Y')" && git push)
