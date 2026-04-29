@@ -103,6 +103,42 @@ def extract_id_from_url(url: str, source: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()[:10]
 
 
+def click_first(page, selectors: list[str], timeout=4000) -> bool:
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            if locator.count():
+                locator.click(timeout=timeout)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def fill_first(page, selectors: list[str], value: str, timeout=7000) -> bool:
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            if locator.count():
+                locator.fill(value, timeout=timeout)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def save_debug_page(page, name: str):
+    try:
+        page.screenshot(path=f"data/{name}.png", full_page=True)
+    except Exception:
+        pass
+    try:
+        with open(f"data/{name}.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+    except Exception:
+        pass
+
+
 def is_private(text: str) -> bool:
     if AGENCY_WORDS.search(text or ""):
         return False
@@ -124,6 +160,7 @@ USER_AGENTS = [
 def scrape_olx(context) -> list[dict]:
     rows = []
     page = context.new_page()
+    olx_logged_in = False
 
     # Вход с акаунт
     if OLX_EMAIL and OLX_PASSWORD:
@@ -131,16 +168,71 @@ def scrape_olx(context) -> list[dict]:
         try:
             page.goto("https://www.olx.bg/accounts/login/", wait_until="domcontentloaded", timeout=30000)
             rand_sleep(1, 2)
-            page.fill('input[name="username"]', OLX_EMAIL)
+
+            click_first(page, [
+                "#onetrust-accept-btn-handler",
+                "button:has-text('Accept')",
+                "button:has-text('Приемам')",
+                "button:has-text('Съгласен')",
+                "button:has-text('Разбрах')",
+            ], timeout=3000)
+
+            email_filled = fill_first(page, [
+                'input[name="username"]',
+                'input[name="email"]',
+                'input[type="email"]',
+                'input[autocomplete="username"]',
+                'input[data-testid*="email"]',
+                'input[data-testid*="username"]',
+                '#username',
+                '#email',
+            ], OLX_EMAIL)
+            if not email_filled:
+                save_debug_page(page, "olx_login_debug")
+                raise RuntimeError("Не намерих поле за email/username на OLX login страницата")
+
             rand_sleep(0.5, 1)
-            page.fill('input[name="password"]', OLX_PASSWORD)
+
+            password_filled = fill_first(page, [
+                'input[name="password"]',
+                'input[type="password"]',
+                'input[autocomplete="current-password"]',
+                'input[data-testid*="password"]',
+                '#password',
+            ], OLX_PASSWORD)
+            if not password_filled:
+                save_debug_page(page, "olx_login_debug")
+                raise RuntimeError("Не намерих поле за парола на OLX login страницата")
+
             rand_sleep(0.5, 1)
-            page.click('button[data-testid="login-submit-button"]')
-            page.wait_for_load_state("networkidle", timeout=15000)
+            clicked_submit = click_first(page, [
+                'button[data-testid="login-submit-button"]',
+                'button[type="submit"]',
+                "button:has-text('Вход')",
+                "button:has-text('Влез')",
+                "button:has-text('Login')",
+                "button:has-text('Log in')",
+            ], timeout=7000)
+            if not clicked_submit:
+                save_debug_page(page, "olx_login_debug")
+                raise RuntimeError("Не намерих бутон за вход на OLX login страницата")
+
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                pass
             rand_sleep(2, 4)
+
+            body_text = page.inner_text("body")
+            if re.search(r'грешна|невалидн|incorrect|invalid|captcha|robot', body_text, re.I):
+                save_debug_page(page, "olx_login_debug")
+                raise RuntimeError("OLX отказа входа или показа captcha/anti-bot проверка")
+
+            olx_logged_in = True
             print("  OLX: влязохме успешно")
         except Exception as e:
             print(f"  OLX login грешка: {e}")
+            print(f"  OLX login debug: data/olx_login_debug.png и data/olx_login_debug.html")
 
     base_url = (
         "https://www.olx.bg/nedvizhimi-imoti/varna/"
@@ -197,7 +289,7 @@ def scrape_olx(context) -> list[dict]:
                 # Телефон — само ако сме влезли в акаунт
                 phone = ""
                 sqm = None
-                if OLX_EMAIL:
+                if olx_logged_in:
                     try:
                         detail = context.new_page()
                         detail.goto(link, wait_until="domcontentloaded", timeout=20000)
@@ -210,13 +302,16 @@ def scrape_olx(context) -> list[dict]:
                             sqm = int(ma.group(1))
 
                         # Натискаме "Покажи телефон"
-                        try:
-                            btn = detail.query_selector('[data-testid="show-phone"]')
-                            if btn:
-                                btn.click()
-                                rand_sleep(1, 2)
-                        except Exception:
-                            pass
+                        click_first(detail, [
+                            '[data-testid="show-phone"]',
+                            'button[data-testid*="phone"]',
+                            'button:has-text("Покажи")',
+                            'button:has-text("телефон")',
+                            'button:has-text("phone")',
+                            'a:has-text("Покажи")',
+                            '[role="button"]:has-text("Покажи")',
+                        ], timeout=5000)
+                        rand_sleep(1, 2)
 
                         phone_el = detail.query_selector('[data-testid="seller-phone-number"]')
                         if phone_el:
