@@ -36,9 +36,20 @@ jobs:
         env:
           OLX_EMAIL: ${{ secrets.OLX_EMAIL }}
           OLX_PASSWORD: ${{ secrets.OLX_PASSWORD }}
+          OLX_STORAGE_STATE_B64: ${{ secrets.OLX_STORAGE_STATE_B64 }}
           MAX_PAGES: 5
           PYTHONUNBUFFERED: "1"
         run: python -u scraper.py
+
+      - name: Upload OLX login debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: olx-login-debug
+          path: |
+            data/olx_login_debug.png
+            data/olx_login_debug.html
+          if-no-files-found: ignore
 
       - name: Save CSV to repo
         run: |
