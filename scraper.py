@@ -10,12 +10,16 @@ import os
 import hashlib
 import pandas as pd
 import sys
+import json
+import base64
 from datetime import date
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 
 # ── Настройки ───────────────────────────────────────────────────
 OLX_EMAIL    = os.environ.get("OLX_EMAIL", "")
 OLX_PASSWORD = os.environ.get("OLX_PASSWORD", "")
+OLX_LOGIN_URL = os.environ.get("OLX_LOGIN_URL", "https://www.olx.bg/accounts/login/")
+OLX_STORAGE_STATE_B64 = os.environ.get("OLX_STORAGE_STATE_B64", "")
 OUTPUT_FILE  = "data/properties_varna.csv"
 MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 BGN_TO_EUR   = 1.95583
@@ -61,6 +65,23 @@ def extract_phones(text: str) -> str:
     return " | ".join(cleaned)
 
 
+def clean_text(text: str, limit: int | None = None) -> str:
+    text = re.sub(r'\s+', ' ', text or '').strip()
+    if limit and len(text) > limit:
+        return text[:limit].rstrip()
+    return text
+
+
+def site_from_link(link: str) -> str:
+    if "olx.bg" in link:
+        return "olx.bg"
+    if "alo.bg" in link:
+        return "alo.bg"
+    if "imot.bg" in link:
+        return "imot.bg"
+    return "unknown"
+
+
 def to_eur(price_str: str) -> int | None:
     if not price_str:
         return None
@@ -75,6 +96,23 @@ def to_eur(price_str: str) -> int | None:
         return int(round(val))
     except Exception:
         return None
+
+
+def extract_sqm(text: str) -> int | None:
+    patterns = [
+        r'(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:кв\.?\s*м\.?|квм|m2|m²|sq\.?\s*m)',
+        r'(?:площ|застроена\s+площ|квадратура)\D{0,20}(\d{1,4}(?:[.,]\d{1,2})?)',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text or "", re.I)
+        if m:
+            try:
+                value = float(m.group(1).replace(",", "."))
+                if 5 <= value <= 50000:
+                    return int(round(value))
+            except Exception:
+                pass
+    return None
 
 
 def detect_type(text: str) -> str:
@@ -107,9 +145,9 @@ def click_first(page, selectors: list[str], timeout=4000) -> bool:
     for selector in selectors:
         try:
             locator = page.locator(selector).first
-            if locator.count():
-                locator.click(timeout=timeout)
-                return True
+            locator.wait_for(state="visible", timeout=timeout)
+            locator.click(timeout=timeout)
+            return True
         except Exception:
             pass
     return False
@@ -119,9 +157,9 @@ def fill_first(page, selectors: list[str], value: str, timeout=7000) -> bool:
     for selector in selectors:
         try:
             locator = page.locator(selector).first
-            if locator.count():
-                locator.fill(value, timeout=timeout)
-                return True
+            locator.wait_for(state="visible", timeout=timeout)
+            locator.fill(value, timeout=timeout)
+            return True
         except Exception:
             pass
     return False
@@ -163,15 +201,31 @@ def scrape_olx(context) -> list[dict]:
     olx_logged_in = False
 
     # Вход с акаунт
-    if OLX_EMAIL and OLX_PASSWORD:
+    if OLX_STORAGE_STATE_B64:
+        olx_logged_in = True
+        print("  OLX: използвам запазена login сесия от OLX_STORAGE_STATE_B64")
+    elif OLX_EMAIL and OLX_PASSWORD:
         print("  OLX: влизане в акаунт...")
         try:
-            page.goto("https://www.olx.bg/accounts/login/", wait_until="domcontentloaded", timeout=30000)
+            login_urls = [OLX_LOGIN_URL, "https://login.olx.bg/", "https://www.olx.bg/accounts/login/"]
+            last_error = None
+            for login_url in dict.fromkeys(login_urls):
+                try:
+                    page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+                    rand_sleep(2, 4)
+                    if page.locator('input[type="email"], input[name="username"], input[name="email"], input[autocomplete="username"]').count():
+                        break
+                except Exception as e:
+                    last_error = e
+            if last_error and not page.url:
+                raise last_error
             rand_sleep(1, 2)
 
             click_first(page, [
                 "#onetrust-accept-btn-handler",
+                "button[id*='accept']",
                 "button:has-text('Accept')",
+                "button:has-text('Accept all')",
                 "button:has-text('Приемам')",
                 "button:has-text('Съгласен')",
                 "button:has-text('Разбрах')",
@@ -181,6 +235,10 @@ def scrape_olx(context) -> list[dict]:
                 'input[name="username"]',
                 'input[name="email"]',
                 'input[type="email"]',
+                'input[type="text"]',
+                'input[placeholder*="mail"]',
+                'input[placeholder*="имейл"]',
+                'input[placeholder*="телефон"]',
                 'input[autocomplete="username"]',
                 'input[data-testid*="email"]',
                 'input[data-testid*="username"]',
@@ -189,7 +247,7 @@ def scrape_olx(context) -> list[dict]:
             ], OLX_EMAIL)
             if not email_filled:
                 save_debug_page(page, "olx_login_debug")
-                raise RuntimeError("Не намерих поле за email/username на OLX login страницата")
+                raise RuntimeError(f"Не намерих поле за email/username. URL: {page.url}")
 
             rand_sleep(0.5, 1)
 
@@ -286,22 +344,23 @@ def scrape_olx(context) -> list[dict]:
 
                 eur = to_eur(price_raw)
 
-                # Телефон — само ако сме влезли в акаунт
                 phone = ""
                 sqm = None
-                if olx_logged_in:
-                    try:
-                        detail = context.new_page()
-                        detail.goto(link, wait_until="domcontentloaded", timeout=20000)
-                        rand_sleep(1, 2)
+                desc_full = title
+                try:
+                    detail = context.new_page()
+                    detail.goto(link, wait_until="domcontentloaded", timeout=20000)
+                    rand_sleep(1, 2)
 
-                        # Площ от детайл страница
-                        detail_text = detail.inner_text("body")
-                        ma = re.search(r'([\d]+)\s*кв\.?м', detail_text)
-                        if ma:
-                            sqm = int(ma.group(1))
+                    detail_text = detail.inner_text("body")
+                    sqm = extract_sqm(f"{title} {detail_text}")
 
-                        # Натискаме "Покажи телефон"
+                    desc_el = detail.query_selector('[data-cy="ad_description"], [data-testid="ad-description"], div:has-text("Описание")')
+                    if desc_el:
+                        desc_full = clean_text(f"{title} | {desc_el.inner_text()}", 600)
+
+                    # Телефон — само ако сме влезли в акаунт
+                    if olx_logged_in:
                         click_first(detail, [
                             '[data-testid="show-phone"]',
                             'button[data-testid*="phone"]',
@@ -319,9 +378,9 @@ def scrape_olx(context) -> list[dict]:
                         else:
                             phone = extract_phones(detail.inner_text("body"))
 
-                        detail.close()
-                    except Exception:
-                        pass
+                    detail.close()
+                except Exception:
+                    pass
 
                 ppm = round(eur / sqm, 2) if eur and sqm else None
 
@@ -330,15 +389,15 @@ def scrape_olx(context) -> list[dict]:
                     "Площ_квм":   sqm,
                     "Цена_на_квм": ppm,
                     "Локация":    loc,
-                    "Описание":   title,
+                    "Описание":   desc_full,
                     "Линк":       link,
                     "Снимка_URL": img,
                     "Дата_обява": date_raw,
-                    "Източник":   "olx",
+                    "Източник":   link,
                     "ID_обява":   extract_id_from_url(link, "olx"),
-                    "Спешност":   is_urgent(title),
+                    "Спешност":   is_urgent(desc_full),
                     "Телефон":    phone,
-                    "Тип_имот":   detect_type(title),
+                    "Тип_имот":   detect_type(desc_full),
                 })
             except Exception as e:
                 print(f"  OLX card грешка: {e}")
@@ -377,7 +436,7 @@ def scrape_alo(context) -> list[dict]:
             print("  ALO: timeout")
             break
 
-        cards = page.query_selector_all(".listvip, .listing-item, [class*='ad-item']")
+        cards = page.query_selector_all(".listvip, .listing-item, [class*='ad-item'], article, div[class*='obiava'], div[class*='listing']")
         if not cards:
             print("  ALO: няма карти")
             break
@@ -393,7 +452,7 @@ def scrape_alo(context) -> list[dict]:
                 if not link.startswith("http"):
                     link = "https://www.alo.bg" + link
 
-                title_el = card.query_selector("[class*='title']")
+                title_el = card.query_selector("[class*='title'], h2, h3, a[href]")
                 title = title_el.inner_text().strip() if title_el else ""
 
                 price_el = card.query_selector("[class*='price']")
@@ -424,21 +483,23 @@ def scrape_alo(context) -> list[dict]:
                         continue
 
                     # Площ
-                    ma = re.search(r'([\d]+)\s*кв\.?м', detail_text)
-                    if ma:
-                        sqm = int(ma.group(1))
+                    sqm = extract_sqm(f"{title} {detail_text}")
 
                     # Описание
                     desc_el = detail.query_selector("[class*='desc'], [class*='description']")
                     if desc_el:
-                        desc_full = title + " | " + desc_el.inner_text().strip()[:300]
+                        desc_full = clean_text(title + " | " + desc_el.inner_text(), 600)
 
                     # Телефон
                     try:
-                        show_btn = detail.query_selector("[class*='show-phone'], [class*='showPhone'], [data-action*='phone']")
-                        if show_btn:
-                            show_btn.click()
-                            rand_sleep(1, 1.5)
+                        click_first(detail, [
+                            "[class*='show-phone']",
+                            "[class*='showPhone']",
+                            "[data-action*='phone']",
+                            "button:has-text('Покажи')",
+                            "a:has-text('Покажи')",
+                        ], timeout=5000)
+                        rand_sleep(1, 1.5)
                     except Exception:
                         pass
                     phone_el = detail.query_selector("a[href^='tel:']")
@@ -468,7 +529,7 @@ def scrape_alo(context) -> list[dict]:
                     "Линк":       link,
                     "Снимка_URL": img,
                     "Дата_обява": date_raw,
-                    "Източник":   "alo",
+                    "Източник":   link,
                     "ID_обява":   extract_id_from_url(link, "alo"),
                     "Спешност":   is_urgent(desc_full),
                     "Телефон":    phone,
@@ -514,7 +575,7 @@ def scrape_imot(context) -> list[dict]:
             print("  imot.bg: timeout")
             break
 
-        links_on_page = page.query_selector_all('a[href*="act=5"]')
+        links_on_page = page.query_selector_all('a[href*="act=5"], a[href*="adv="], a[href*="imot.cgi"]')
         if not links_on_page:
             print("  imot.bg: няма повече")
             break
@@ -524,7 +585,7 @@ def scrape_imot(context) -> list[dict]:
         seen_hrefs = set()
         for a in links_on_page:
             h = a.get_attribute("href") or ""
-            if "act=5" in h and h not in seen_hrefs:
+            if ("act=5" in h or "adv=" in h) and h not in seen_hrefs:
                 seen_hrefs.add(h)
                 full = "https://www.imot.bg" + h if not h.startswith("http") else h
                 hrefs.append(full)
@@ -558,9 +619,7 @@ def scrape_imot(context) -> list[dict]:
 
                 # Площ
                 sqm = None
-                ma = re.search(r'([\d]+)\s*кв\.?м', detail_text)
-                if ma:
-                    sqm = int(ma.group(1))
+                sqm = extract_sqm(f"{title} {detail_text}")
 
                 ppm = round(eur / sqm, 2) if eur and sqm else None
 
@@ -596,7 +655,7 @@ def scrape_imot(context) -> list[dict]:
                     "Линк":       link,
                     "Снимка_URL": img,
                     "Дата_обява": date_raw,
-                    "Източник":   "imot",
+                    "Източник":   link,
                     "ID_обява":   extract_id_from_url(link, "imot"),
                     "Спешност":   is_urgent(full_desc),
                     "Телефон":    phone,
@@ -633,12 +692,15 @@ def main():
                 "--disable-gpu",
             ],
         )
-        context = browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={"width": 1366, "height": 768},
-            locale="bg-BG",
-            extra_http_headers={"Accept-Language": "bg-BG,bg;q=0.9,en;q=0.8"},
-        )
+        context_options = {
+            "user_agent": random.choice(USER_AGENTS),
+            "viewport": {"width": 1366, "height": 768},
+            "locale": "bg-BG",
+            "extra_http_headers": {"Accept-Language": "bg-BG,bg;q=0.9,en;q=0.8"},
+        }
+        if OLX_STORAGE_STATE_B64:
+            context_options["storage_state"] = json.loads(base64.b64decode(OLX_STORAGE_STATE_B64).decode("utf-8"))
+        context = browser.new_context(**context_options)
 
         print("\n=== OLX.bg ===")
         try:
@@ -667,6 +729,13 @@ def main():
 
     df = pd.DataFrame(all_rows, columns=COLS)
 
+    if df.empty:
+        final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Описание",
+                      "Източник","Снимка_URL","Дата_обява","Спешност","Телефон"]
+        pd.DataFrame(columns=final_cols).to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
+        print(f"\n⚠️ Няма намерени обяви → {OUTPUT_FILE}")
+        return
+
     # Дедупликация по линк
     df = df.drop_duplicates(subset=["Линк"])
 
@@ -684,10 +753,18 @@ def main():
     mask = df["Цена_на_квм"].isna() & df["Цена"].notna() & df["Площ_квм"].notna()
     df.loc[mask, "Цена_на_квм"] = (df.loc[mask, "Цена"] / df.loc[mask, "Площ_квм"]).round(2)
 
+    # Финален ред на колоните за CSV
+    df["Локация-район"] = df["Локация"]
+    df["Цена_кв.м"] = df["Цена_на_квм"]
+    df["Описание"] = df["Описание"].fillna("").map(lambda x: clean_text(str(x), 800))
+    final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Описание",
+                  "Източник","Снимка_URL","Дата_обява","Спешност","Телефон"]
+    df = df[final_cols]
+
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
 
     print(f"\n✅ ГОТОВО — {len(df)} уникални обяви → {OUTPUT_FILE}")
-    print(df["Източник"].value_counts().to_string())
+    print(df["Източник"].map(site_from_link).value_counts().to_string())
     print(df["Тип_имот"].value_counts().to_string())
 
 
