@@ -9,6 +9,7 @@ import random
 import os
 import hashlib
 import pandas as pd
+import sys
 from datetime import date
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 
@@ -16,7 +17,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 OLX_EMAIL    = os.environ.get("OLX_EMAIL", "")
 OLX_PASSWORD = os.environ.get("OLX_PASSWORD", "")
 OUTPUT_FILE  = "data/properties_varna.csv"
-MAX_PAGES    = 25
+MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 BGN_TO_EUR   = 1.95583
 
 PHONE_RE  = re.compile(r'(?:0|\+359)[\s\-]?\d[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}')
@@ -40,6 +41,8 @@ PRIVATE_WORDS = re.compile(
 )
 
 os.makedirs("data", exist_ok=True)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 
 
 # ── Помощни функции ─────────────────────────────────────────────
