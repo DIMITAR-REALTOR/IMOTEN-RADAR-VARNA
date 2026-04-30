@@ -41,17 +41,24 @@ jobs:
           MAX_ALO_PAGES: 5
           MAX_IMOT_PAGES: 5
           MAX_OLX_PAGES: 1
+          SCRAPE_ALO: "1"
+          SCRAPE_IMOT: "1"
+          SCRAPE_OLX: "1"
           PYTHONUNBUFFERED: "1"
         run: python -u scraper.py
 
-      - name: Upload OLX login debug
+      - name: Upload scraper debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: olx-login-debug
+          name: scraper-debug
           path: |
             data/olx_login_debug.png
             data/olx_login_debug.html
+            data/alo_*_debug.png
+            data/alo_*_debug.html
+            data/imot_*_debug.png
+            data/imot_*_debug.html
           if-no-files-found: ignore
 
       - name: Save CSV to repo
