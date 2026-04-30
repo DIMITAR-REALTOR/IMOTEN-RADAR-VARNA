@@ -34,16 +34,14 @@ jobs:
       - name: Run scraper
         timeout-minutes: 60
         env:
-          OLX_EMAIL: ${{ secrets.OLX_EMAIL }}
-          OLX_PASSWORD: ${{ secrets.OLX_PASSWORD }}
-          OLX_STORAGE_STATE_B64: ${{ secrets.OLX_STORAGE_STATE_B64 }}
           MAX_PAGES: 5
           MAX_ALO_PAGES: 5
           MAX_IMOT_PAGES: 5
-          MAX_OLX_PAGES: 1
+          MAX_OLX_PAGES: 5
           SCRAPE_ALO: "1"
           SCRAPE_IMOT: "1"
           SCRAPE_OLX: "1"
+          OLX_FETCH_PHONES: "0"
           PYTHONUNBUFFERED: "1"
         run: python -u scraper.py
 
