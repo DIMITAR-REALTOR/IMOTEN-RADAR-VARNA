@@ -22,6 +22,9 @@ OLX_LOGIN_URL = os.environ.get("OLX_LOGIN_URL", "https://www.olx.bg/accounts/log
 OLX_STORAGE_STATE_B64 = os.environ.get("OLX_STORAGE_STATE_B64", "")
 OUTPUT_FILE  = "data/properties_varna.csv"
 MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
+MAX_OLX_PAGES = int(os.environ.get("MAX_OLX_PAGES", str(MAX_PAGES)))
+MAX_ALO_PAGES = int(os.environ.get("MAX_ALO_PAGES", str(MAX_PAGES)))
+MAX_IMOT_PAGES = int(os.environ.get("MAX_IMOT_PAGES", str(MAX_PAGES)))
 BGN_TO_EUR   = 1.95583
 
 PHONE_RE  = re.compile(r'(?:0|\+359)[\s\-]?\d[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}')
@@ -177,6 +180,46 @@ def save_debug_page(page, name: str):
         pass
 
 
+def reveal_phone(page) -> str:
+    before = page.inner_text("body")
+    phone = extract_phones(before)
+    if phone:
+        return phone
+
+    click_first(page, [
+        'button:has-text("Виж номера")',
+        'a:has-text("Виж номера")',
+        '[role="button"]:has-text("Виж номера")',
+        'button:has-text("Виж номер")',
+        'a:has-text("Виж номер")',
+        '[role="button"]:has-text("Виж номер")',
+        'button:has-text("Покажи телефона")',
+        'button:has-text("Покажи телефон")',
+        'a:has-text("Покажи телефона")',
+        'a:has-text("Покажи телефон")',
+        'button:has-text("Обади се")',
+        'a:has-text("Обади се")',
+        '[role="button"]:has-text("Обади се")',
+        '[data-testid="show-phone"]',
+        '[data-testid*="phone"]',
+        '[class*="show-phone"]',
+        '[class*="showPhone"]',
+        '[data-action*="phone"]',
+        'a[href^="tel:"]',
+    ], timeout=6000)
+    rand_sleep(1.5, 2.5)
+
+    phone_el = page.query_selector('[data-testid="seller-phone-number"], a[href^="tel:"]')
+    if phone_el:
+        href = phone_el.get_attribute("href") or ""
+        text = phone_el.inner_text() or ""
+        phone = extract_phones(f"{href} {text}")
+        if phone:
+            return phone
+
+    return extract_phones(page.inner_text("body"))
+
+
 def is_private(text: str) -> bool:
     if AGENCY_WORDS.search(text or ""):
         return False
@@ -299,7 +342,7 @@ def scrape_olx(context) -> list[dict]:
     )
 
     current_page = 1
-    while current_page <= MAX_PAGES:
+    while current_page <= MAX_OLX_PAGES:
         url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
         print(f"  OLX стр.{current_page}")
         try:
@@ -361,22 +404,7 @@ def scrape_olx(context) -> list[dict]:
 
                     # Телефон — само ако сме влезли в акаунт
                     if olx_logged_in:
-                        click_first(detail, [
-                            '[data-testid="show-phone"]',
-                            'button[data-testid*="phone"]',
-                            'button:has-text("Покажи")',
-                            'button:has-text("телефон")',
-                            'button:has-text("phone")',
-                            'a:has-text("Покажи")',
-                            '[role="button"]:has-text("Покажи")',
-                        ], timeout=5000)
-                        rand_sleep(1, 2)
-
-                        phone_el = detail.query_selector('[data-testid="seller-phone-number"]')
-                        if phone_el:
-                            phone = clean_phone(phone_el.inner_text())
-                        else:
-                            phone = extract_phones(detail.inner_text("body"))
+                        phone = reveal_phone(detail)
 
                     detail.close()
                 except Exception:
@@ -425,7 +453,7 @@ def scrape_alo(context) -> list[dict]:
     base_url = "https://www.alo.bg/obiavi/nedvizhimi-imoti/varna/?adv_type=sale&adv_by=1"
 
     current_page = 1
-    while current_page <= MAX_PAGES:
+    while current_page <= MAX_ALO_PAGES:
         url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
         print(f"  ALO стр.{current_page}")
         try:
@@ -491,22 +519,7 @@ def scrape_alo(context) -> list[dict]:
                         desc_full = clean_text(title + " | " + desc_el.inner_text(), 600)
 
                     # Телефон
-                    try:
-                        click_first(detail, [
-                            "[class*='show-phone']",
-                            "[class*='showPhone']",
-                            "[data-action*='phone']",
-                            "button:has-text('Покажи')",
-                            "a:has-text('Покажи')",
-                        ], timeout=5000)
-                        rand_sleep(1, 1.5)
-                    except Exception:
-                        pass
-                    phone_el = detail.query_selector("a[href^='tel:']")
-                    if phone_el:
-                        phone = clean_phone(phone_el.get_attribute("href") or "")
-                    if not phone:
-                        phone = extract_phones(detail_text)
+                    phone = reveal_phone(detail)
 
                     # Снимка
                     if not img:
@@ -564,7 +577,7 @@ def scrape_imot(context) -> list[dict]:
     )
 
     current_page = 1
-    while current_page <= MAX_PAGES:
+    while current_page <= MAX_IMOT_PAGES:
         url = base_url if current_page == 1 else f"{base_url}&f21={current_page}"
         print(f"  imot.bg стр.{current_page}")
         try:
@@ -702,12 +715,6 @@ def main():
             context_options["storage_state"] = json.loads(base64.b64decode(OLX_STORAGE_STATE_B64).decode("utf-8"))
         context = browser.new_context(**context_options)
 
-        print("\n=== OLX.bg ===")
-        try:
-            all_rows += scrape_olx(context)
-        except Exception as e:
-            print(f"OLX ГРЕШКА: {e}")
-
         print("\n=== ALO.bg ===")
         try:
             all_rows += scrape_alo(context)
@@ -720,6 +727,12 @@ def main():
         except Exception as e:
             print(f"imot.bg ГРЕШКА: {e}")
 
+        print("\n=== OLX.bg ===")
+        try:
+            all_rows += scrape_olx(context)
+        except Exception as e:
+            print(f"OLX ГРЕШКА: {e}")
+
         browser.close()
 
     # ── Обединяване и почистване ──
@@ -730,8 +743,8 @@ def main():
     df = pd.DataFrame(all_rows, columns=COLS)
 
     if df.empty:
-        final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Описание",
-                      "Източник","Снимка_URL","Дата_обява","Спешност","Телефон"]
+        final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
+                      "Описание","Източник","Снимка_URL","Дата_обява","Спешност"]
         pd.DataFrame(columns=final_cols).to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
         print(f"\n⚠️ Няма намерени обяви → {OUTPUT_FILE}")
         return
@@ -757,8 +770,8 @@ def main():
     df["Локация-район"] = df["Локация"]
     df["Цена_кв.м"] = df["Цена_на_квм"]
     df["Описание"] = df["Описание"].fillna("").map(lambda x: clean_text(str(x), 800))
-    final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Описание",
-                  "Източник","Снимка_URL","Дата_обява","Спешност","Телефон"]
+    final_cols = ["Тип_имот","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
+                  "Описание","Източник","Снимка_URL","Дата_обява","Спешност"]
     df = df[final_cols]
 
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
