@@ -18,8 +18,10 @@ from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 # ── Настройки ───────────────────────────────────────────────────
 OLX_EMAIL    = os.environ.get("OLX_EMAIL", "")
 OLX_PASSWORD = os.environ.get("OLX_PASSWORD", "")
-OLX_LOGIN_URL = os.environ.get("OLX_LOGIN_URL", "https://www.olx.bg/accounts/login/")
+OLX_LOGIN_URL = os.environ.get("OLX_LOGIN_URL", "https://www.olx.bg/")
 OLX_STORAGE_STATE_B64 = os.environ.get("OLX_STORAGE_STATE_B64", "")
+ALO_STORAGE_STATE_B64 = os.environ.get("ALO_STORAGE_STATE_B64", "")
+BROWSER_STORAGE_STATE_B64 = os.environ.get("BROWSER_STORAGE_STATE_B64", "")
 OUTPUT_FILE  = "data/properties_varna.csv"
 MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 MAX_OLX_PAGES = int(os.environ.get("MAX_OLX_PAGES", str(MAX_PAGES)))
@@ -28,6 +30,7 @@ MAX_IMOT_PAGES = int(os.environ.get("MAX_IMOT_PAGES", str(MAX_PAGES)))
 SCRAPE_ALO = os.environ.get("SCRAPE_ALO", "1") == "1"
 SCRAPE_IMOT = os.environ.get("SCRAPE_IMOT", "1") == "1"
 SCRAPE_OLX = os.environ.get("SCRAPE_OLX", "1") == "1"
+OLX_FETCH_PHONES = os.environ.get("OLX_FETCH_PHONES", "0") == "1"
 BGN_TO_EUR   = 1.95583
 
 PHONE_RE  = re.compile(r'(?:0|\+359)[\s\-]?\d[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}')
@@ -171,6 +174,85 @@ def fill_first(page, selectors: list[str], value: str, timeout=7000) -> bool:
     return False
 
 
+def has_login_form(page) -> bool:
+    selectors = [
+        'input[name="username"]',
+        'input[name="email"]',
+        'input[type="email"]',
+        'input[autocomplete="username"]',
+        'input[name="password"]',
+        'input[type="password"]',
+    ]
+    for selector in selectors:
+        try:
+            if page.locator(selector).count():
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def open_olx_login(page):
+    entry_urls = [
+        OLX_LOGIN_URL,
+        "https://www.olx.bg/",
+        "https://www.olx.bg/nedvizhimi-imoti/varna/",
+    ]
+    profile_selectors = [
+        'a:has-text("Твоя профил")',
+        'button:has-text("Твоя профил")',
+        '[role="button"]:has-text("Твоя профил")',
+        'a:has-text("Твоят профил")',
+        'button:has-text("Твоят профил")',
+        '[role="button"]:has-text("Твоят профил")',
+        'a:has-text("Моят профил")',
+        'button:has-text("Моят профил")',
+        'a[href*="login.olx.bg"]',
+        'a[href*="/myaccount"]',
+        'a[href*="/account"]',
+        '[data-testid*="login"]',
+        '[data-testid*="account"]',
+        '[data-cy*="login"]',
+        '[data-cy*="account"]',
+    ]
+
+    last_error = None
+    for entry_url in dict.fromkeys(entry_urls):
+        try:
+            page.goto(entry_url, wait_until="domcontentloaded", timeout=30000)
+            rand_sleep(2, 4)
+            click_first(page, [
+                "#onetrust-accept-btn-handler",
+                "button[id*='accept']",
+                "button:has-text('Accept')",
+                "button:has-text('Accept all')",
+                "button:has-text('Приемам')",
+                "button:has-text('Съгласен')",
+                "button:has-text('Разбрах')",
+            ], timeout=2500)
+            if has_login_form(page):
+                return
+            if click_first(page, profile_selectors, timeout=6000):
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+                rand_sleep(2, 4)
+                if has_login_form(page) or "login.olx.bg" in page.url:
+                    return
+        except Exception as e:
+            last_error = e
+
+    try:
+        page.goto("https://login.olx.bg/", wait_until="domcontentloaded", timeout=30000)
+        rand_sleep(2, 4)
+    except Exception as e:
+        last_error = e
+
+    if last_error and not has_login_form(page):
+        raise last_error
+
+
 def save_debug_page(page, name: str):
     try:
         page.screenshot(path=f"data/{name}.png", full_page=True)
@@ -255,25 +337,16 @@ def scrape_olx(context) -> list[dict]:
     page = context.new_page()
     olx_logged_in = False
 
-    # Вход с акаунт
-    if OLX_STORAGE_STATE_B64:
+    # Вход с акаунт - по подразбиране е изключен, защото OLX блокира automation login.
+    if not OLX_FETCH_PHONES:
+        print("  OLX: телефоните са изключени (OLX_FETCH_PHONES=0)")
+    elif OLX_STORAGE_STATE_B64 or BROWSER_STORAGE_STATE_B64:
         olx_logged_in = True
-        print("  OLX: използвам запазена login сесия от OLX_STORAGE_STATE_B64")
-    elif OLX_EMAIL and OLX_PASSWORD:
+        print("  OLX: използвам запазена login сесия")
+    elif OLX_FETCH_PHONES and OLX_EMAIL and OLX_PASSWORD:
         print("  OLX: влизане в акаунт...")
         try:
-            login_urls = [OLX_LOGIN_URL, "https://login.olx.bg/", "https://www.olx.bg/accounts/login/"]
-            last_error = None
-            for login_url in dict.fromkeys(login_urls):
-                try:
-                    page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
-                    rand_sleep(2, 4)
-                    if page.locator('input[type="email"], input[name="username"], input[name="email"], input[autocomplete="username"]').count():
-                        break
-                except Exception as e:
-                    last_error = e
-            if last_error and not page.url:
-                raise last_error
+            open_olx_login(page)
             rand_sleep(1, 2)
 
             click_first(page, [
@@ -479,6 +552,7 @@ def scrape_alo(context) -> list[dict]:
         cards = page.query_selector_all(".listvip, .listvip-item, .listing-item, [class*='ad-item'], article, div[class*='obiava'], div[class*='listing']")
         if not cards:
             cards = page.query_selector_all("a[href*='/obiava/'], a[href*='/ad/'], a[href*='alo.bg/']")
+        print(f"  ALO: намерени {len(cards)} елемента на стр.{current_page}")
         if not cards:
             print("  ALO: няма карти")
             save_debug_page(page, f"alo_page_{current_page}_debug")
@@ -533,11 +607,6 @@ def scrape_alo(context) -> list[dict]:
                     if not title:
                         title_el2 = detail.query_selector("h1, h2, h3, title")
                         title = clean_text(title_el2.inner_text() if title_el2 else "", 200)
-
-                    # Частно лице проверка
-                    if AGENCY_WORDS.search(detail_text) and not PRIVATE_WORDS.search(detail_text):
-                        detail.close()
-                        continue
 
                     # Площ
                     sqm = sqm or extract_sqm(f"{title} {detail_text}")
@@ -599,15 +668,11 @@ def scrape_imot(context) -> list[dict]:
     rows = []
     page = context.new_page()
 
-    # act=11 продажба, f1=1 Варна, f2=1 само собственик
-    base_url = (
-        "https://www.imot.bg/pcgi/imot.cgi"
-        "?act=11&f1=1&f2=1"
-    )
+    base_url = "https://www.imot.bg/obiavi/prodazhbi/grad-varna"
 
     current_page = 1
     while current_page <= MAX_IMOT_PAGES:
-        url = base_url if current_page == 1 else f"{base_url}&f21={current_page}"
+        url = base_url if current_page == 1 else f"{base_url}?page={current_page}"
         print(f"  imot.bg стр.{current_page}")
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -632,6 +697,7 @@ def scrape_imot(context) -> list[dict]:
                 seen_hrefs.add(h)
                 full = "https://www.imot.bg" + h if h.startswith("/") else h
                 hrefs.append(full)
+        print(f"  imot.bg: намерени {len(hrefs)} линка на стр.{current_page}")
         if not hrefs:
             print("  imot.bg: няма валидни линкове към обяви")
             save_debug_page(page, f"imot_page_{current_page}_debug")
@@ -653,11 +719,6 @@ def scrape_imot(context) -> list[dict]:
                 desc_el = detail.query_selector(".description, [class*='desc']")
                 desc = desc_el.inner_text().strip()[:400] if desc_el else ""
                 full_desc = (title + " | " + desc).strip(" |")
-
-                # Частно лице — imot.bg вече го филтрира с f2=1, но проверяваме пак
-                if AGENCY_WORDS.search(full_desc) and not PRIVATE_WORDS.search(full_desc):
-                    detail.close()
-                    continue
 
                 # Цена
                 price_el = detail.query_selector("[class*='price'], .price")
@@ -745,8 +806,9 @@ def main():
             "locale": "bg-BG",
             "extra_http_headers": {"Accept-Language": "bg-BG,bg;q=0.9,en;q=0.8"},
         }
-        if OLX_STORAGE_STATE_B64:
-            context_options["storage_state"] = json.loads(base64.b64decode(OLX_STORAGE_STATE_B64).decode("utf-8"))
+        storage_state_b64 = BROWSER_STORAGE_STATE_B64 or OLX_STORAGE_STATE_B64 or ALO_STORAGE_STATE_B64
+        if storage_state_b64:
+            context_options["storage_state"] = json.loads(base64.b64decode(storage_state_b64).decode("utf-8"))
         context = browser.new_context(**context_options)
 
         if SCRAPE_ALO:
