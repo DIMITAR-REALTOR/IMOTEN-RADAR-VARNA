@@ -25,6 +25,9 @@ MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 MAX_OLX_PAGES = int(os.environ.get("MAX_OLX_PAGES", str(MAX_PAGES)))
 MAX_ALO_PAGES = int(os.environ.get("MAX_ALO_PAGES", str(MAX_PAGES)))
 MAX_IMOT_PAGES = int(os.environ.get("MAX_IMOT_PAGES", str(MAX_PAGES)))
+SCRAPE_ALO = os.environ.get("SCRAPE_ALO", "1") == "1"
+SCRAPE_IMOT = os.environ.get("SCRAPE_IMOT", "1") == "1"
+SCRAPE_OLX = os.environ.get("SCRAPE_OLX", "1") == "1"
 BGN_TO_EUR   = 1.95583
 
 PHONE_RE  = re.compile(r'(?:0|\+359)[\s\-]?\d[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}')
@@ -195,11 +198,20 @@ def reveal_phone(page) -> str:
         '[role="button"]:has-text("Виж номер")',
         'button:has-text("Покажи телефона")',
         'button:has-text("Покажи телефон")',
+        'button:has-text("Покажи")',
         'a:has-text("Покажи телефона")',
         'a:has-text("Покажи телефон")',
+        'a:has-text("Покажи")',
+        '[role="button"]:has-text("Покажи")',
         'button:has-text("Обади се")',
         'a:has-text("Обади се")',
         '[role="button"]:has-text("Обади се")',
+        'button:has-text("Виж")',
+        'a:has-text("Виж")',
+        '[role="button"]:has-text("Виж")',
+        'input[value="Виж"]',
+        '.phone:has-text("Виж")',
+        '[class*="phone"]:has-text("Виж")',
         '[data-testid="show-phone"]',
         '[data-testid*="phone"]',
         '[class*="show-phone"]',
@@ -464,46 +476,63 @@ def scrape_alo(context) -> list[dict]:
             print("  ALO: timeout")
             break
 
-        cards = page.query_selector_all(".listvip, .listing-item, [class*='ad-item'], article, div[class*='obiava'], div[class*='listing']")
+        cards = page.query_selector_all(".listvip, .listvip-item, .listing-item, [class*='ad-item'], article, div[class*='obiava'], div[class*='listing']")
+        if not cards:
+            cards = page.query_selector_all("a[href*='/obiava/'], a[href*='/ad/'], a[href*='alo.bg/']")
         if not cards:
             print("  ALO: няма карти")
+            save_debug_page(page, f"alo_page_{current_page}_debug")
             break
 
         for card in cards:
             try:
-                link_el = card.query_selector("a[href*='/obiava/'], a[href*='/ad/']")
+                link_el = card.query_selector("a.listvip-image[href], a[href*='alo.bg/'][href], a[href*='/obiava/'], a[href*='/ad/']")
                 if not link_el:
                     link_el = card.query_selector("a[href]")
+                if not link_el and (card.get_attribute("href") or ""):
+                    link_el = card
                 link = link_el.get_attribute("href") if link_el else ""
                 if not link:
                     continue
                 if not link.startswith("http"):
                     link = "https://www.alo.bg" + link
+                if "alo.bg" not in link or any(x in link for x in ["/login", "/users", "/search", "/obiavi/nedvizhimi-imoti/varna/"]):
+                    continue
 
-                title_el = card.query_selector("[class*='title'], h2, h3, a[href]")
-                title = title_el.inner_text().strip() if title_el else ""
+                title_el = card.query_selector(".listvip-item-title, [class*='title'], h2, h3, a[href]")
+                title = title_el.inner_text().strip() if title_el else card.inner_text().strip()
 
-                price_el = card.query_selector("[class*='price']")
+                price_el = card.query_selector(".ads-params-multi:has-text('€'), [class*='price']")
                 price_raw = price_el.inner_text().strip() if price_el else ""
                 eur = to_eur(price_raw)
 
-                loc_el = card.query_selector("[class*='address'], [class*='location']")
+                loc_el = card.query_selector(".listvip-item-address, [class*='address'], [class*='location']")
                 loc = loc_el.inner_text().strip() if loc_el else "Варна"
 
                 img_el = card.query_selector("img[src]")
                 img = img_el.get_attribute("src") if img_el else ""
 
-                date_el = card.query_selector("[class*='date'], [class*='time']")
+                date_el = card.query_selector(".hidden-xs:last-child, [class*='date'], [class*='time']")
                 date_raw = date_el.inner_text().strip() if date_el else ""
 
+                card_text = card.inner_text()
+                sqm = extract_sqm(card_text)
+                ppm_match = re.search(r'(\d+(?:[.,]\d+)?)\s*€/кв\.?м', card_text, re.I)
+                ppm = float(ppm_match.group(1).replace(",", ".")) if ppm_match else None
+                desc_el_card = card.query_selector(".listvip-desc")
+                desc_full = clean_text(f"{title} | {desc_el_card.inner_text() if desc_el_card else ''}", 600)
+
                 # Отваряме детайл страница за телефон и площ
-                phone, sqm, desc_full = "", None, title
+                phone = ""
                 try:
                     detail = context.new_page()
                     detail.goto(link, wait_until="domcontentloaded", timeout=20000)
                     rand_sleep(1.5, 2.5)
 
                     detail_text = detail.inner_text("body")
+                    if not title:
+                        title_el2 = detail.query_selector("h1, h2, h3, title")
+                        title = clean_text(title_el2.inner_text() if title_el2 else "", 200)
 
                     # Частно лице проверка
                     if AGENCY_WORDS.search(detail_text) and not PRIVATE_WORDS.search(detail_text):
@@ -511,7 +540,7 @@ def scrape_alo(context) -> list[dict]:
                         continue
 
                     # Площ
-                    sqm = extract_sqm(f"{title} {detail_text}")
+                    sqm = sqm or extract_sqm(f"{title} {detail_text}")
 
                     # Описание
                     desc_el = detail.query_selector("[class*='desc'], [class*='description']")
@@ -531,7 +560,7 @@ def scrape_alo(context) -> list[dict]:
                 except Exception:
                     pass
 
-                ppm = round(eur / sqm, 2) if eur and sqm else None
+                ppm = ppm or (round(eur / sqm, 2) if eur and sqm else None)
 
                 rows.append({
                     "Цена":        eur,
@@ -588,9 +617,10 @@ def scrape_imot(context) -> list[dict]:
             print("  imot.bg: timeout")
             break
 
-        links_on_page = page.query_selector_all('a[href*="act=5"], a[href*="adv="], a[href*="imot.cgi"]')
+        links_on_page = page.query_selector_all('a[href*="/obiava-"], a[href*="act=5"], a[href*="adv="], a[href*="imot.cgi"]')
         if not links_on_page:
             print("  imot.bg: няма повече")
+            save_debug_page(page, f"imot_page_{current_page}_debug")
             break
 
         # Вземаме уникалните линкове
@@ -598,10 +628,14 @@ def scrape_imot(context) -> list[dict]:
         seen_hrefs = set()
         for a in links_on_page:
             h = a.get_attribute("href") or ""
-            if ("act=5" in h or "adv=" in h) and h not in seen_hrefs:
+            if ("/obiava-" in h or "act=5" in h or "adv=" in h) and h not in seen_hrefs and "act=11" not in h:
                 seen_hrefs.add(h)
-                full = "https://www.imot.bg" + h if not h.startswith("http") else h
+                full = "https://www.imot.bg" + h if h.startswith("/") else h
                 hrefs.append(full)
+        if not hrefs:
+            print("  imot.bg: няма валидни линкове към обяви")
+            save_debug_page(page, f"imot_page_{current_page}_debug")
+            break
 
         for link in hrefs:
             try:
@@ -715,23 +749,35 @@ def main():
             context_options["storage_state"] = json.loads(base64.b64decode(OLX_STORAGE_STATE_B64).decode("utf-8"))
         context = browser.new_context(**context_options)
 
-        print("\n=== ALO.bg ===")
-        try:
-            all_rows += scrape_alo(context)
-        except Exception as e:
-            print(f"ALO ГРЕШКА: {e}")
+        if SCRAPE_ALO:
+            print("\n=== ALO.bg ===")
+            try:
+                all_rows += scrape_alo(context)
+            except Exception as e:
+                print(f"ALO ГРЕШКА: {e}")
+        else:
+            print("\n=== ALO.bg ===")
+            print("  ALO: пропуснато чрез SCRAPE_ALO=0")
 
-        print("\n=== imot.bg ===")
-        try:
-            all_rows += scrape_imot(context)
-        except Exception as e:
-            print(f"imot.bg ГРЕШКА: {e}")
+        if SCRAPE_IMOT:
+            print("\n=== imot.bg ===")
+            try:
+                all_rows += scrape_imot(context)
+            except Exception as e:
+                print(f"imot.bg ГРЕШКА: {e}")
+        else:
+            print("\n=== imot.bg ===")
+            print("  imot.bg: пропуснато чрез SCRAPE_IMOT=0")
 
-        print("\n=== OLX.bg ===")
-        try:
-            all_rows += scrape_olx(context)
-        except Exception as e:
-            print(f"OLX ГРЕШКА: {e}")
+        if SCRAPE_OLX:
+            print("\n=== OLX.bg ===")
+            try:
+                all_rows += scrape_olx(context)
+            except Exception as e:
+                print(f"OLX ГРЕШКА: {e}")
+        else:
+            print("\n=== OLX.bg ===")
+            print("  OLX: пропуснато чрез SCRAPE_OLX=0")
 
         browser.close()
 
