@@ -38,6 +38,9 @@ jobs:
           OLX_PASSWORD: ${{ secrets.OLX_PASSWORD }}
           OLX_STORAGE_STATE_B64: ${{ secrets.OLX_STORAGE_STATE_B64 }}
           MAX_PAGES: 5
+          MAX_ALO_PAGES: 5
+          MAX_IMOT_PAGES: 5
+          MAX_OLX_PAGES: 1
           PYTHONUNBUFFERED: "1"
         run: python -u scraper.py
 
