@@ -34,10 +34,10 @@ jobs:
       - name: Run scraper
         timeout-minutes: 60
         env:
-          MAX_PAGES: 5
-          MAX_ALO_PAGES: 5
-          MAX_IMOT_PAGES: 5
-          MAX_OLX_PAGES: 5
+          MAX_PAGES: 30
+          MAX_ALO_PAGES: 30
+          MAX_IMOT_PAGES: 30
+          MAX_OLX_PAGES: 30
           SCRAPE_ALO: "1"
           SCRAPE_IMOT: "1"
           SCRAPE_OLX: "1"
