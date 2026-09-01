@@ -33,7 +33,7 @@ SCRAPE_OLX = os.environ.get("SCRAPE_OLX", "1") == "1"
 OLX_FETCH_PHONES = os.environ.get("OLX_FETCH_PHONES", "0") == "1"
 BGN_TO_EUR   = 1.95583
 
-PHONE_RE  = re.compile(r'(?:0|\+359)[\s\-]?\d[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}')
+PHONE_RE  = re.compile(r'(?<!\d)(?:\+359[\s\-]?|0)\d(?:[\s\-]?\d){8}(?!\d)')
 URGENT_RE = re.compile(r'спешно|бързо|намалена\s+цена|веднага', re.I)
 
 PROPERTY_TYPES = {
