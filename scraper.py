@@ -140,7 +140,7 @@ def extract_id_from_url(url: str, source: str) -> str:
     if source == "olx":
         m = re.search(r'-(\d+)\.html', url) or re.search(r'/d/[^/]+-(\d+)', url)
     elif source == "imot":
-        m = re.search(r'adv=(\d+)', url)
+        m = re.search(r'/obiava-([a-z0-9]+)-', url) or re.search(r'adv=(\d+)', url)
     elif source == "alo":
         m = re.search(r'/(\d+)/?$', url) or re.search(r'-(\d+)\.html', url)
     else:
@@ -665,6 +665,7 @@ def scrape_alo(context) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════
 
 def scrape_imot(context) -> list[dict]:
+    """Обхожда списъка с обяви (без да отваря всяка обява поотделно)."""
     rows = []
     page = context.new_page()
 
@@ -672,7 +673,7 @@ def scrape_imot(context) -> list[dict]:
 
     current_page = 1
     while current_page <= MAX_IMOT_PAGES:
-        url = base_url if current_page == 1 else f"{base_url}?page={current_page}"
+        url = base_url if current_page == 1 else f"{base_url}/p-{current_page}?sort=2"
         print(f"  imot.bg стр.{current_page}")
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -682,77 +683,76 @@ def scrape_imot(context) -> list[dict]:
             print("  imot.bg: timeout")
             break
 
-        links_on_page = page.query_selector_all('a[href*="/obiava-"], a[href*="act=5"], a[href*="adv="], a[href*="imot.cgi"]')
-        if not links_on_page:
+        cards = page.query_selector_all(".ads2023 > div.item")
+        if not cards:
             print("  imot.bg: няма повече")
             save_debug_page(page, f"imot_page_{current_page}_debug")
             break
 
-        # Вземаме уникалните линкове
-        hrefs = []
-        seen_hrefs = set()
-        for a in links_on_page:
-            h = a.get_attribute("href") or ""
-            if ("/obiava-" in h or "act=5" in h or "adv=" in h) and h not in seen_hrefs and "act=11" not in h:
-                seen_hrefs.add(h)
-                full = "https://www.imot.bg" + h if h.startswith("/") else h
-                hrefs.append(full)
-        print(f"  imot.bg: намерени {len(hrefs)} линка на стр.{current_page}")
-        if not hrefs:
-            print("  imot.bg: няма валидни линкове към обяви")
-            save_debug_page(page, f"imot_page_{current_page}_debug")
-            break
-
-        for link in hrefs:
+        page_count = 0
+        for card in cards:
             try:
-                detail = context.new_page()
-                detail.goto(link, wait_until="domcontentloaded", timeout=20000)
-                rand_sleep(1, 2)
+                # Пропускаме обявите от агенции — искаме само частни лица
+                if card.query_selector(".seller"):
+                    continue
 
-                detail_text = detail.inner_text("body")
+                title_el = card.query_selector(".zaglavie a.title")
+                if not title_el:
+                    continue
 
-                # Заглавие
-                title_el = detail.query_selector("h1, h2, .title")
-                title = title_el.inner_text().strip() if title_el else ""
+                link = title_el.get_attribute("href") or ""
+                if link.startswith("//"):
+                    link = "https:" + link
+                elif link.startswith("/"):
+                    link = "https://www.imot.bg" + link
 
-                # Описание
-                desc_el = detail.query_selector(".description, [class*='desc']")
-                desc = desc_el.inner_text().strip()[:400] if desc_el else ""
-                full_desc = (title + " | " + desc).strip(" |")
+                type_title = title_el.evaluate(
+                    "el => Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim()"
+                )
 
-                # Цена
-                price_el = detail.query_selector("[class*='price'], .price")
-                price_raw = price_el.inner_text() if price_el else detail_text
+                loc_el = card.query_selector(".zaglavie a.title location")
+                loc = loc_el.inner_text().strip() if loc_el else "Варна"
+
+                price_el = card.query_selector(".zaglavie .price div")
+                price_raw = price_el.inner_text().strip() if price_el else ""
                 eur = to_eur(price_raw)
 
-                # Площ
-                sqm = None
-                sqm = extract_sqm(f"{title} {detail_text}")
+                info_el = card.query_selector(".info")
+                info_text = info_el.inner_text().strip() if info_el else ""
 
+                phone = extract_phones(info_text)
+                sqm = extract_sqm(f"{type_title} {info_text}")
                 ppm = round(eur / sqm, 2) if eur and sqm else None
 
-                # Локация
-                loc_el = detail.query_selector("h2, [class*='location'], [class*='adress']")
-                loc = loc_el.inner_text().strip().split("\n")[0] if loc_el else "Варна"
+                # Описание без номера накрая (телефонът вече е отделна колона)
+                desc_clean = PHONE_RE.sub("", info_text)
+                desc_clean = re.sub(r",?\s*тел\.:\s*$", "", desc_clean).strip(" ,")
+                full_desc = clean_text(f"{type_title}, {loc} | {desc_clean}", 800)
 
-                # Дата
-                date_el = detail.query_selector("[class*='date'], [class*='time']")
-                date_raw = date_el.inner_text().strip() if date_el else ""
+                img_el = card.query_selector(".photo img.pic")
+                img = img_el.get_attribute("src") or "" if img_el else ""
+                if img.startswith("//"):
+                    img = "https:" + img
 
-                # Телефон
-                phone = extract_phones(detail_text)
-                if not phone:
-                    phone_el = detail.query_selector("a[href^='tel:']")
-                    if phone_el:
-                        phone = clean_phone(phone_el.get_attribute("href") or "")
+                is_new = card.query_selector("new strong") is not None
 
-                # Снимка
-                img = ""
-                img_el = detail.query_selector("img[src*='imot.bg'], img[src*='property']")
-                if img_el:
-                    img = img_el.get_attribute("src") or ""
-
-                detail.close()
+                # Тип имот — първо по заглавието на imot.bg (по-точно),
+                # после fallback към общата детекция по текст
+                title_up = type_title.upper()
+                if "ГАРАЖ" in title_up or "ПАРКОМЯСТО" in title_up:
+                    prop_type = "гараж"
+                elif "ПАРЦЕЛ" in title_up:
+                    prop_type = "парцел"
+                elif "КЪЩА" in title_up or "ВИЛА" in title_up:
+                    prop_type = "къща"
+                elif "ОФИС" in title_up:
+                    prop_type = "офис"
+                elif any(w in title_up for w in ("МАГАЗИН", "СКЛАД", "ЗАВЕДЕНИЕ", "ХОТЕЛ", "ПРОМ.")):
+                    prop_type = "търговски"
+                elif "СТАЕН" in title_up or "МЕЗОНЕТ" in title_up or "АТЕЛИЕ" in title_up:
+                    prop_type = "апартамент"
+                else:
+                    prop_type = detect_type(f"{type_title} {info_text}")
 
                 rows.append({
                     "Цена":        eur,
@@ -762,24 +762,27 @@ def scrape_imot(context) -> list[dict]:
                     "Описание":   full_desc,
                     "Линк":       link,
                     "Снимка_URL": img,
-                    "Дата_обява": date_raw,
+                    "Дата_обява": "Нова обява" if is_new else "",
                     "Източник":   link,
                     "ID_обява":   extract_id_from_url(link, "imot"),
                     "Спешност":   is_urgent(full_desc),
                     "Телефон":    phone,
-                    "Тип_имот":   detect_type(full_desc),
+                    "Тип_имот":   prop_type,
                 })
+                page_count += 1
             except Exception as e:
-                print(f"  imot.bg грешка: {e}")
+                print(f"  imot.bg card грешка: {e}")
 
-        next_btn = page.query_selector('a[href*="f21="]')
+        print(f"  imot.bg: {page_count} частни обяви на стр.{current_page}")
+
+        next_btn = page.query_selector("a.next")
         if not next_btn:
             break
         current_page += 1
         rand_sleep(2, 4)
 
     page.close()
-    print(f"  imot.bg: {len(rows)} обяви")
+    print(f"  imot.bg: {len(rows)} обяви общо")
     return rows
 
 
