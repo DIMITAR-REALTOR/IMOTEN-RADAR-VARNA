@@ -19,6 +19,9 @@ from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 OLX_EMAIL    = os.environ.get("OLX_EMAIL", "")
 OLX_PASSWORD = os.environ.get("OLX_PASSWORD", "")
 OLX_LOGIN_URL = os.environ.get("OLX_LOGIN_URL", "https://www.olx.bg/")
+IMOT_EMAIL    = os.environ.get("IMOT_EMAIL", "")
+IMOT_PASSWORD = os.environ.get("IMOT_PASSWORD", "")
+IMOT_LOGIN_URL = os.environ.get("IMOT_LOGIN_URL", "https://www.imot.bg/")
 OLX_STORAGE_STATE_B64 = os.environ.get("OLX_STORAGE_STATE_B64", "")
 ALO_STORAGE_STATE_B64 = os.environ.get("ALO_STORAGE_STATE_B64", "")
 BROWSER_STORAGE_STATE_B64 = os.environ.get("BROWSER_STORAGE_STATE_B64", "")
@@ -73,6 +76,51 @@ PRICE_FLOOR_SALE = {
     "апартамент": 5000, "къща": 5000, "гараж": 1000, "парцел": 500,
     "земеделска": 500, "офис": 1000, "търговски": 1000,
 }
+
+# ── Ново строителство / директно от инвеститор-строител ────────────
+# Няма сайтов филтър за това при нито един от трите сайта (проверено:
+# imot.bg има отделна секция "Нови сгради", но е на ниво сграда/проект за
+# цяла България, не на ниво отделна обява за Варна — различна структура
+# от тази, която обхождаме). Затова е по ключови думи в текста и в името
+# на подателя — най-вероятна оценка, не 100% точна.
+NEW_BUILD_RE = re.compile(
+    r'акт\s*1[456]\b|ще\s+бъде\s+въведен\s+в\s+експлоатация|новостроя\w*|нова\s+сграда|'
+    r'ново\s+строителство|в\s+строеж\b|строителство\s+в\s+ход',
+    re.I,
+)
+_INEXPL_YEAR_RE = re.compile(r'въведен\s+в\s+експлоатация\s*(\d{4})', re.I)
+
+INVESTOR_RE = re.compile(
+    r'директно\s+от\s+инвеститор|от\s+инвеститор\b|инвеститорск\w*|'
+    r'строителна\s+фирма|строителна\s+компания|строителя?т?\s+продава|'
+    r'без\s+комисион\w*\s+от\s+купувач',
+    re.I,
+)
+# Име на фирма-подател, съдържащо "инвест"/"строй"/"строител"/"билдинг" И
+# разпознато вече като фирма (AGENCY_WORDS) — типично за строителни фирми,
+# продаващи директно (напр. "ХОУМ ВАРНА ЕООД", "СТИНЕКС ИНВЕСТ ЕООД").
+INVESTOR_COMPANY_RE = re.compile(r'инвест|строй|строител|билдинг|девелъп', re.I)
+
+
+def is_new_build(text: str) -> bool:
+    if NEW_BUILD_RE.search(text or ""):
+        return True
+    m = _INEXPL_YEAR_RE.search(text or "")
+    if m:
+        try:
+            if int(m.group(1)) >= date.today().year - 1:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def is_from_investor(text: str, publisher: str = "") -> bool:
+    if INVESTOR_RE.search(text or ""):
+        return True
+    if publisher and INVESTOR_COMPANY_RE.search(publisher) and AGENCY_WORDS.search(publisher):
+        return True
+    return False
 
 # ── "Боклук" текст, който понякога се прихваща заедно с описанието ──
 # (навигация/категории на сайта — напр. "Бизнеси, Стаи, Услуги"), когато
@@ -347,6 +395,95 @@ def open_olx_login(page):
         raise last_error
 
 
+def open_imot_login(page):
+    """Best-effort вход в imot.bg с имейл/парола (IMOT_EMAIL/IMOT_PASSWORD).
+    Нужен е само за да ползваме fe_agkinds филтъра (частни лица/строителни
+    фирми/инвеститори — виж IMOT_AGKIND_PASSES) — без логин скрейпърът пак
+    работи нормално, просто без този филтър (fallback към евристиката по
+    текст/маркер, както досега).
+
+    Селекторите тук са best-effort по същия модел като open_olx_login() —
+    пробват няколко варианта, не са потвърдени "на живо" срещу реалната
+    форма за вход (виж README, "Известни ограничения"), защото не сме
+    рискували да разлогваме активна сесия по време на разработка. Ако не
+    сработят, вдига грешка и scrape_imot() просто продължава без филтъра.
+    """
+    page.goto(IMOT_LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+    rand_sleep(1, 2)
+
+    click_first(page, [
+        "#onetrust-accept-btn-handler",
+        "button[id*='accept']",
+        "button:has-text('Приемам')",
+        "button:has-text('Съгласен')",
+        "button:has-text('Разбрах')",
+    ], timeout=2500)
+
+    if not has_login_form(page):
+        click_first(page, [
+            'a:has-text("Вход")',
+            'button:has-text("Вход")',
+            'a[href*="login"]',
+            'a:has-text("Вход / Регистрация")',
+            'a:has-text("Вход/Регистрация")',
+        ], timeout=6000)
+        rand_sleep(1, 2)
+
+    email_filled = fill_first(page, [
+        'input[name="username"]',
+        'input[name="email"]',
+        'input[type="email"]',
+        'input[name="user"]',
+        'input[id*="user"]',
+        'input[id*="email"]',
+        'input[autocomplete="username"]',
+        'input[placeholder*="имейл"]',
+        'input[placeholder*="потребител"]',
+    ], IMOT_EMAIL)
+    if not email_filled:
+        save_debug_page(page, "imot_login_debug")
+        raise RuntimeError(f"imot.bg: не намерих поле за имейл/потребител. URL: {page.url}")
+
+    rand_sleep(0.5, 1)
+
+    password_filled = fill_first(page, [
+        'input[name="password"]',
+        'input[type="password"]',
+        'input[id*="pass"]',
+        'input[autocomplete="current-password"]',
+    ], IMOT_PASSWORD)
+    if not password_filled:
+        save_debug_page(page, "imot_login_debug")
+        raise RuntimeError("imot.bg: не намерих поле за парола")
+
+    rand_sleep(0.5, 1)
+    clicked_submit = click_first(page, [
+        'button[type="submit"]',
+        'input[type="submit"]',
+        "button:has-text('Вход')",
+        "button:has-text('Влез')",
+        'input[value="Вход"]',
+    ], timeout=7000)
+    if not clicked_submit:
+        save_debug_page(page, "imot_login_debug")
+        raise RuntimeError("imot.bg: не намерих бутон за вход")
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    rand_sleep(1, 2)
+
+    body_text = page.inner_text("body")
+    if re.search(r'грешна|невалидн|incorrect|invalid|captcha|robot', body_text, re.I):
+        save_debug_page(page, "imot_login_debug")
+        raise RuntimeError("imot.bg отказа входа или показа captcha/anti-bot проверка")
+
+    if has_login_form(page):
+        save_debug_page(page, "imot_login_debug")
+        raise RuntimeError("imot.bg: формата за вход още стои на екрана — вероятно неуспешен вход")
+
+
 def save_debug_page(page, name: str):
     try:
         page.screenshot(path=f"data/{name}.png", full_page=True)
@@ -425,6 +562,12 @@ USER_AGENTS = [
 # ══════════════════════════════════════════════════════════════════
 # OLX.BG
 # ══════════════════════════════════════════════════════════════════
+
+OLX_DEAL_PASSES = [
+    ("prodazhbi", "продажба"),
+    ("naemi", "наем"),
+]
+
 
 def scrape_olx(context) -> list[dict]:
     rows = []
@@ -517,116 +660,125 @@ def scrape_olx(context) -> list[dict]:
     # Обхождаме и двата вида продавачи — частни лица И агенции — за да могат
     # да се анализират/сравняват после (преди агенционните обяви изобщо не се
     # сваляха, филтърът беше на ниво URL). Всеки ред пази "Тип_продавач".
+    # Обхождаме и продажби, и наеми (по-рано само продажби) — "Тип_сделка".
     SELLER_PASSES = [
         ("private", "частно лице"),
         ("business", "агенция"),
     ]
 
-    for private_business_qs, seller_label in SELLER_PASSES:
-        base_url = (
-            "https://www.olx.bg/nedvizhimi-imoti/varna/"
-            f"?search%5Bprivate_business%5D={private_business_qs}"
-            "&search%5Border%5D=created_at:desc"
-        )
+    for deal_path, deal_label in OLX_DEAL_PASSES:
+        if MAX_OLX_PAGES < 1:
+            continue
+        for private_business_qs, seller_label in SELLER_PASSES:
+            base_url = (
+                f"https://www.olx.bg/nedvizhimi-imoti/{deal_path}/varna/"
+                f"?currency=EUR&search%5Bprivate_business%5D={private_business_qs}"
+                "&search%5Border%5D=created_at:desc"
+            )
 
-        current_page = 1
-        while current_page <= MAX_OLX_PAGES:
-            url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
-            print(f"  OLX/{seller_label} стр.{current_page}")
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                # Скрол за lazy load
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
-                rand_sleep(0.5, 1)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                rand_sleep(1, 2)
-            except PwTimeout:
-                print("  OLX: timeout")
-                break
-
-            cards = page.query_selector_all('[data-cy="l-card"]')
-            if not cards:
-                print("  OLX: няма карти")
-                break
-
-            for card in cards:
+            current_page = 1
+            while current_page <= MAX_OLX_PAGES:
+                url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
+                print(f"  OLX/{deal_label}/{seller_label} стр.{current_page}")
                 try:
-                    link_el = card.query_selector('a[href*="/d/"]')
-                    link = link_el.get_attribute("href") if link_el else ""
-                    if not link:
-                        continue
-                    if not link.startswith("http"):
-                        link = "https://www.olx.bg" + link
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    # Скрол за lazy load
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
+                    rand_sleep(0.5, 1)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    rand_sleep(1, 2)
+                except PwTimeout:
+                    print("  OLX: timeout")
+                    break
 
-                    title_el = card.query_selector('[data-cy="ad-card-title"]')
-                    title = title_el.inner_text().strip() if title_el else ""
+                cards = page.query_selector_all('[data-cy="l-card"]')
+                if not cards:
+                    # Спираме само когато страницата реално няма карти — не
+                    # разчитаме на бутона "напред" (виж бележката за imot.bg
+                    # по-долу: понякога липсва в отговора към бота дори когато
+                    # следваща страница има резултати; същият риск важи и тук).
+                    break
 
-                    price_el = card.query_selector('[data-testid="ad-price"]')
-                    price_raw = price_el.inner_text().strip() if price_el else ""
-
-                    loc_el = card.query_selector('[data-testid="location-date"]')
-                    loc_raw = loc_el.inner_text().strip() if loc_el else ""
-                    parts = loc_raw.split("-")
-                    loc = parts[0].strip()
-                    date_raw = parts[-1].strip() if len(parts) > 1 else ""
-
-                    img_el = card.query_selector("img[src]")
-                    img = img_el.get_attribute("src") if img_el else ""
-
-                    eur = to_eur(price_raw)
-
-                    phone = ""
-                    sqm = None
-                    desc_full = title
+                for card in cards:
                     try:
-                        detail = context.new_page()
-                        detail.goto(link, wait_until="domcontentloaded", timeout=20000)
-                        rand_sleep(1, 2)
+                        link_el = card.query_selector('a[href*="/d/"]')
+                        link = link_el.get_attribute("href") if link_el else ""
+                        if not link:
+                            continue
+                        if not link.startswith("http"):
+                            link = "https://www.olx.bg" + link
 
-                        detail_text = detail.inner_text("body")
-                        sqm = extract_sqm(f"{title} {detail_text}")
+                        title_el = card.query_selector('[data-cy="ad-card-title"]')
+                        title = title_el.inner_text().strip() if title_el else ""
 
-                        # Забележка: тук НЕ ползваме широк ':has-text("Описание")' селектор —
-                        # той понякога захваща цялото меню/навигацията на страницата вместо
-                        # само описанието на обявата (оттам "Бизнеси, Стаи, Услуги" боклук в текста).
-                        desc_el = detail.query_selector('[data-cy="ad_description"], [data-testid="ad-description"]')
-                        if desc_el:
-                            desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text()}"), 600)
+                        price_el = card.query_selector('[data-testid="ad-price"]')
+                        price_raw = price_el.inner_text().strip() if price_el else ""
 
-                        # Телефон — само ако сме влезли в акаунт
-                        if olx_logged_in:
-                            phone = reveal_phone(detail)
+                        loc_el = card.query_selector('[data-testid="location-date"]')
+                        loc_raw = loc_el.inner_text().strip() if loc_el else ""
+                        parts = loc_raw.split("-")
+                        loc = parts[0].strip()
+                        date_raw = parts[-1].strip() if len(parts) > 1 else ""
 
-                        detail.close()
-                    except Exception:
-                        pass
+                        img_el = card.query_selector("img[src]")
+                        img = img_el.get_attribute("src") if img_el else ""
 
-                    ppm = round(eur / sqm, 2) if eur and sqm else None
+                        eur = to_eur(price_raw)
 
-                    rows.append({
-                        "Цена":        eur,
-                        "Площ_квм":   sqm,
-                        "Цена_на_квм": ppm,
-                        "Локация":    loc,
-                        "Описание":   desc_full,
-                        "Линк":       link,
-                        "Снимка_URL": img,
-                        "Дата_обява": date_raw,
-                        "Източник":   link,
-                        "ID_обява":   extract_id_from_url(link, "olx"),
-                        "Спешност":   is_urgent(desc_full),
-                        "Телефон":    phone,
-                        "Тип_имот":   detect_type(desc_full),
-                        "Тип_продавач": seller_label,
-                    })
-                except Exception as e:
-                    print(f"  OLX card грешка: {e}")
+                        phone = ""
+                        sqm = None
+                        desc_full = title
+                        try:
+                            detail = context.new_page()
+                            detail.goto(link, wait_until="domcontentloaded", timeout=20000)
+                            rand_sleep(1, 2)
 
-            next_btn = page.query_selector('[data-cy="pagination-forward"]')
-            if not next_btn:
-                break
-            current_page += 1
-            rand_sleep(2, 3)
+                            detail_text = detail.inner_text("body")
+                            sqm = extract_sqm(f"{title} {detail_text}")
+
+                            # Забележка: тук НЕ ползваме широк ':has-text("Описание")' селектор —
+                            # той понякога захваща цялото меню/навигацията на страницата вместо
+                            # само описанието на обявата (оттам "Бизнеси, Стаи, Услуги" боклук в текста).
+                            desc_el = detail.query_selector('[data-cy="ad_description"], [data-testid="ad-description"]')
+                            if desc_el:
+                                desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text()}"), 600)
+
+                            # Телефон — само ако сме влезли в акаунт
+                            if olx_logged_in:
+                                phone = reveal_phone(detail)
+
+                            detail.close()
+                        except Exception:
+                            pass
+
+                        ppm = round(eur / sqm, 2) if eur and sqm else None
+
+                        rows.append({
+                            "Цена":        eur,
+                            "Площ_квм":   sqm,
+                            "Цена_на_квм": ppm,
+                            "Локация":    loc,
+                            "Описание":   desc_full,
+                            "Линк":       link,
+                            "Снимка_URL": img,
+                            "Дата_обява": date_raw,
+                            "Източник":   link,
+                            "ID_обява":   extract_id_from_url(link, "olx"),
+                            "Спешност":   is_urgent(desc_full),
+                            "Телефон":    phone,
+                            "Тип_имот":   detect_type(desc_full),
+                            "Тип_продавач": seller_label,
+                            "Тип_сделка": deal_label,
+                            "Ново_строителство": "YES" if is_new_build(desc_full) else "",
+                            "От_инвеститор": "YES" if is_from_investor(desc_full) else "",
+                        })
+                    except Exception as e:
+                        print(f"  OLX card грешка: {e}")
+
+                # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
+                # — не разчитаме на пагинационния бутон "напред".
+                current_page += 1
+                rand_sleep(2, 3)
 
     page.close()
     print(f"  OLX: {len(rows)} обяви")
@@ -637,14 +789,30 @@ def scrape_olx(context) -> list[dict]:
 # ALO.BG
 # ══════════════════════════════════════════════════════════════════
 
-ALO_CATEGORIES = [
-    "apartamenti-stai",
-    "kashti-vili",
-    "parceli-za-zastroiavane-investicionni-proekti",
-    "garaji-parkomesta",
-    "magazini-ofisi",
-    "zemedelska-zemia-gradini-lozia-gora",
-    "promishleni-pomeshtenia-skladove",
+# Категорийните адреси на ALO се различават между "продажби" и "наеми"
+# раздела (проверено на живо, не е просто добавен суфикс) — напр. продажби
+# "apartamenti-stai" срещу наеми "apartamenti", продажби "garaji-parkomesta"
+# срещу наеми "garaji-parkingi-parkomesta".
+ALO_DEAL_PASSES = [
+    ("imoti-prodajbi", "продажба", [
+        "apartamenti-stai",
+        "kashti-vili",
+        "parceli-za-zastroiavane-investicionni-proekti",
+        "garaji-parkomesta",
+        "magazini-ofisi",
+        "zemedelska-zemia-gradini-lozia-gora",
+        "promishleni-pomeshtenia-skladove",
+    ]),
+    ("imoti-naemi", "наем", [
+        "apartamenti",
+        "kashti-vili",
+        "garaji-parkingi-parkomesta",
+        "magazini-ofisi",
+        "promishleni-pomeshtenia-skladove",
+        "parceli-tereni",
+        "zavedenia",
+        "hoteli-pochivni-stancii",
+    ]),
 ]
 ALO_VARNA_QS = "region_id=3&location_ids=554"
 
@@ -657,121 +825,125 @@ def scrape_alo(context) -> list[dict]:
     rows = []
     page = context.new_page()
 
-    for category in ALO_CATEGORIES:
-        base_url = f"https://www.alo.bg/obiavi/imoti-prodajbi/{category}/?{ALO_VARNA_QS}"
-        current_page = 1
-        while current_page <= MAX_ALO_PAGES:
-            url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
-            print(f"  ALO/{category} стр.{current_page}")
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                rand_sleep(1, 2)
-            except PwTimeout:
-                print("  ALO: timeout")
-                break
-
-            cards = page.query_selector_all(".listtop-item")
-            if not cards:
-                if current_page == 1:
-                    print(f"  ALO/{category}: няма обяви за Варна")
-                break
-
-            for card in cards:
+    for deal_path, deal_label, categories in ALO_DEAL_PASSES:
+        for category in categories:
+            base_url = f"https://www.alo.bg/obiavi/{deal_path}/{category}/?{ALO_VARNA_QS}"
+            current_page = 1
+            while current_page <= MAX_ALO_PAGES:
+                url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
+                print(f"  ALO/{deal_label}/{category} стр.{current_page}")
                 try:
-                    link_el = card.query_selector("a[href]")
-                    link = link_el.get_attribute("href") if link_el else ""
-                    if not link:
-                        continue
-                    if not link.startswith("http"):
-                        link = "https://www.alo.bg" + link
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    rand_sleep(1, 2)
+                except PwTimeout:
+                    print("  ALO: timeout")
+                    break
 
-                    title_el = card.query_selector(".listtop-item-title")
-                    title = title_el.inner_text().strip() if title_el else ""
+                cards = page.query_selector_all(".listtop-item")
+                if not cards:
+                    if current_page == 1:
+                        print(f"  ALO/{deal_label}/{category}: няма обяви за Варна")
+                    break
 
-                    pub_el = card.query_selector(".listtop-publisher span")
-                    publisher = pub_el.inner_text().strip() if pub_el else ""
-
-                    # По-рано тук прескачахме обявите от агенции. Сега ги пазим,
-                    # само таг-нати — за да могат агенция vs. частно лице да се
-                    # анализират/сравняват после (виж "Тип_продавач" по-долу).
-                    seller_label = "агенция" if AGENCY_WORDS.search(f"{publisher} {title}") else "частно лице"
-
-                    loc_el = card.query_selector(".listtop-item-address")
-                    loc = loc_el.inner_text().strip() if loc_el else "Варна"
-
-                    price_raw = ""
-                    ppm_raw = ""
-                    type_raw = ""
-                    sqm_raw = ""
-                    for row_el in card.query_selector_all(".ads-params-row"):
-                        label_el = row_el.query_selector(".ads-param-title")
-                        val_el = row_el.query_selector(".ads-params-cell")
-                        if not label_el or not val_el:
-                            continue
-                        label = label_el.inner_text().strip()
-                        val = val_el.inner_text().strip()
-                        if label.startswith("Цена"):
-                            price_raw = val
-                        elif label.startswith("за кв.м"):
-                            ppm_raw = val
-                        elif label.startswith("Вид на имота"):
-                            type_raw = val
-                        elif label.startswith("Квадратура"):
-                            sqm_raw = val
-
-                    eur = to_eur(price_raw)
-                    sqm = extract_sqm(sqm_raw) or extract_sqm(title)
-                    ppm_match = re.search(r'([\d.,]+)\s*€/кв\.?м', ppm_raw, re.I)
-                    ppm = float(ppm_match.group(1).replace(",", ".")) if ppm_match else None
-
-                    desc_el = card.query_selector(".listtop-desc")
-                    desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text() if desc_el else ''}"), 600)
-
-                    img_el = card.query_selector("img.listtop-image-img")
-                    img = img_el.get_attribute("src") if img_el else ""
-                    if img and not img.startswith("http"):
-                        img = "https://www.alo.bg/" + img.lstrip("/")
-
-                    # Отваряме детайл страница за телефон (и площ ако липсва)
-                    phone = ""
+                for card in cards:
                     try:
-                        detail = context.new_page()
-                        detail.goto(link, wait_until="domcontentloaded", timeout=20000)
-                        rand_sleep(1.5, 2.5)
+                        link_el = card.query_selector("a[href]")
+                        link = link_el.get_attribute("href") if link_el else ""
+                        if not link:
+                            continue
+                        if not link.startswith("http"):
+                            link = "https://www.alo.bg" + link
 
-                        detail_text = detail.inner_text("body")
-                        if not sqm:
-                            sqm = extract_sqm(detail_text)
+                        title_el = card.query_selector(".listtop-item-title")
+                        title = title_el.inner_text().strip() if title_el else ""
 
-                        phone = reveal_phone(detail)
-                        detail.close()
-                    except Exception:
-                        pass
+                        pub_el = card.query_selector(".listtop-publisher span")
+                        publisher = pub_el.inner_text().strip() if pub_el else ""
 
-                    ppm = ppm or (round(eur / sqm, 2) if eur and sqm else None)
+                        # По-рано тук прескачахме обявите от агенции. Сега ги пазим,
+                        # само таг-нати — за да могат агенция vs. частно лице да се
+                        # анализират/сравняват после (виж "Тип_продавач" по-долу).
+                        seller_label = "агенция" if AGENCY_WORDS.search(f"{publisher} {title}") else "частно лице"
 
-                    rows.append({
-                        "Цена":        eur,
-                        "Площ_квм":   sqm,
-                        "Цена_на_квм": ppm,
-                        "Локация":    loc,
-                        "Описание":   desc_full,
-                        "Линк":       link,
-                        "Снимка_URL": img,
-                        "Дата_обява": "",
-                        "Източник":   link,
-                        "ID_обява":   extract_id_from_url(link, "alo"),
-                        "Спешност":   is_urgent(desc_full),
-                        "Телефон":    phone,
-                        "Тип_имот":   detect_type(f"{type_raw} {desc_full}"),
-                        "Тип_продавач": seller_label,
-                    })
-                except Exception as e:
-                    print(f"  ALO card грешка: {e}")
+                        loc_el = card.query_selector(".listtop-item-address")
+                        loc = loc_el.inner_text().strip() if loc_el else "Варна"
 
-            current_page += 1
-            rand_sleep(2, 3)
+                        price_raw = ""
+                        ppm_raw = ""
+                        type_raw = ""
+                        sqm_raw = ""
+                        for row_el in card.query_selector_all(".ads-params-row"):
+                            label_el = row_el.query_selector(".ads-param-title")
+                            val_el = row_el.query_selector(".ads-params-cell")
+                            if not label_el or not val_el:
+                                continue
+                            label = label_el.inner_text().strip()
+                            val = val_el.inner_text().strip()
+                            if label.startswith("Цена"):
+                                price_raw = val
+                            elif label.startswith("за кв.м"):
+                                ppm_raw = val
+                            elif label.startswith("Вид на имота"):
+                                type_raw = val
+                            elif label.startswith("Квадратура"):
+                                sqm_raw = val
+
+                        eur = to_eur(price_raw)
+                        sqm = extract_sqm(sqm_raw) or extract_sqm(title)
+                        ppm_match = re.search(r'([\d.,]+)\s*€/кв\.?м', ppm_raw, re.I)
+                        ppm = float(ppm_match.group(1).replace(",", ".")) if ppm_match else None
+
+                        desc_el = card.query_selector(".listtop-desc")
+                        desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text() if desc_el else ''}"), 600)
+
+                        img_el = card.query_selector("img.listtop-image-img")
+                        img = img_el.get_attribute("src") if img_el else ""
+                        if img and not img.startswith("http"):
+                            img = "https://www.alo.bg/" + img.lstrip("/")
+
+                        # Отваряме детайл страница за телефон (и площ ако липсва)
+                        phone = ""
+                        try:
+                            detail = context.new_page()
+                            detail.goto(link, wait_until="domcontentloaded", timeout=20000)
+                            rand_sleep(1.5, 2.5)
+
+                            detail_text = detail.inner_text("body")
+                            if not sqm:
+                                sqm = extract_sqm(detail_text)
+
+                            phone = reveal_phone(detail)
+                            detail.close()
+                        except Exception:
+                            pass
+
+                        ppm = ppm or (round(eur / sqm, 2) if eur and sqm else None)
+
+                        rows.append({
+                            "Цена":        eur,
+                            "Площ_квм":   sqm,
+                            "Цена_на_квм": ppm,
+                            "Локация":    loc,
+                            "Описание":   desc_full,
+                            "Линк":       link,
+                            "Снимка_URL": img,
+                            "Дата_обява": "",
+                            "Източник":   link,
+                            "ID_обява":   extract_id_from_url(link, "alo"),
+                            "Спешност":   is_urgent(desc_full),
+                            "Телефон":    phone,
+                            "Тип_имот":   detect_type(f"{type_raw} {desc_full}"),
+                            "Тип_продавач": seller_label,
+                            "Тип_сделка": deal_label,
+                            "Ново_строителство": "YES" if is_new_build(desc_full) else "",
+                            "От_инвеститор": "YES" if is_from_investor(desc_full, publisher) else "",
+                        })
+                    except Exception as e:
+                        print(f"  ALO card грешка: {e}")
+
+                current_page += 1
+                rand_sleep(2, 3)
 
     page.close()
     print(f"  ALO: {len(rows)} обяви")
@@ -782,17 +954,44 @@ def scrape_alo(context) -> list[dict]:
 # IMOT.BG
 # ══════════════════════════════════════════════════════════════════
 
-def scrape_imot(context) -> list[dict]:
-    """Обхожда списъка с обяви (без да отваря всяка обява поотделно)."""
+IMOT_DEAL_PASSES = [
+    ("prodazhbi", "продажба"),
+    ("naemi", "наем"),
+]
+
+# fe_agkinds — реален сайтов филтър на imot.bg за тип продавач. Потвърден на
+# живо (докато сесията е логната, виж README): 0 = частни лица, 2 =
+# строителни фирми, 4 = инвеститори. Работи само за продажби (prodazhbi) —
+# не сме проверявали дали важи и за наеми, затова не го пробваме там.
+IMOT_AGKIND_PASSES = [
+    (0, "частно лице", False),
+    (2, "агенция", True),
+    (4, "агенция", True),
+]
+
+
+def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label: str,
+                        seller_override: str | None = None, investor_override: bool | None = None) -> list[dict]:
+    """Обхожда страниците на едно търсене в imot.bg (един URL + пагинация) и
+    връща списък от редове. Изведена е отделно, защото я викаме по няколко
+    пъти с различни URL-и — веднъж без филтър (общо търсене) и, ако сме
+    логнати, по веднъж на всеки fe_agkinds филтър (виж IMOT_AGKIND_PASSES).
+
+    seller_override/investor_override: когато идват от логнат fe_agkinds
+    филтър, знаем типа продавач и дали е инвеститор/строител СИГУРНО от
+    самия сайт — пренебрегваме локалната евристика (".seller" маркер/
+    ключови думи в текста) за тези редове.
+    """
     rows = []
-    page = context.new_page()
-
-    base_url = "https://www.imot.bg/obiavi/prodazhbi/grad-varna"
-
     current_page = 1
     while current_page <= MAX_IMOT_PAGES:
-        url = base_url if current_page == 1 else f"{base_url}/p-{current_page}?sort=2"
-        print(f"  imot.bg стр.{current_page}")
+        if current_page == 1:
+            url = base_url
+        elif "?" in base_url:
+            url = f"{base_url}&p={current_page}"
+        else:
+            url = f"{base_url}/p-{current_page}?sort=2"
+        print(f"  imot.bg/{pass_label} стр.{current_page}")
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -812,7 +1011,7 @@ def scrape_imot(context) -> list[dict]:
             try:
                 # По-рано тук прескачахме обявите от агенции (маркер ".seller").
                 # Сега ги пазим, само таг-нати — виж "Тип_продавач" по-долу.
-                seller_label = "агенция" if card.query_selector(".seller") else "частно лице"
+                seller_label = seller_override or ("агенция" if card.query_selector(".seller") else "частно лице")
 
                 title_el = card.query_selector(".zaglavie a.title")
                 if not title_el:
@@ -848,7 +1047,7 @@ def scrape_imot(context) -> list[dict]:
                 full_desc = clean_text(strip_nav_junk(f"{type_title}, {loc} | {desc_clean}"), 800)
 
                 # По подразбиране описанието на imot.bg е само краткото резюме
-                # от списъка с обяви (сайтът не показва пълния текст там).
+                # от страницата със списъка (сайтът не показва пълния текст там).
                 # При IMOT_FETCH_FULL_DESC=1 пробваме да вземем и пълния текст
                 # от детайлната страница — селекторите по-долу не са потвърдени
                 # "на живо" (виж README), затова е best-effort с fallback към
@@ -895,6 +1094,14 @@ def scrape_imot(context) -> list[dict]:
                 else:
                     prop_type = detect_type(f"{type_title} {info_text}")
 
+                if investor_override is not None:
+                    is_investor = investor_override
+                else:
+                    # Няма потвърден селектор за име на фирма/публикуващ на
+                    # imot.bg извън логнатия fe_agkinds филтър — детекцията
+                    # тук разчита само на текста на описанието.
+                    is_investor = is_from_investor(full_desc)
+
                 rows.append({
                     "Цена":        eur,
                     "Площ_квм":   sqm,
@@ -910,12 +1117,15 @@ def scrape_imot(context) -> list[dict]:
                     "Телефон":    phone,
                     "Тип_имот":   prop_type,
                     "Тип_продавач": seller_label,
+                    "Тип_сделка": deal_label,
+                    "Ново_строителство": "YES" if is_new_build(full_desc) else "",
+                    "От_инвеститор": "YES" if is_investor else "",
                 })
                 page_count += 1
             except Exception as e:
                 print(f"  imot.bg card грешка: {e}")
 
-        print(f"  imot.bg: {page_count} обяви на стр.{current_page}")
+        print(f"  imot.bg/{pass_label}: {page_count} обяви на стр.{current_page}")
 
         # ЗАБЕЛЕЖКА: спираме САМО когато страницата няма карти (виж по-горе).
         # Преди тук проверявахме и линка "Напред" (a.next) и спирахме ако липсва,
@@ -923,6 +1133,45 @@ def scrape_imot(context) -> list[dict]:
         # страница реално има резултати — затова вече не разчитаме на него.
         current_page += 1
         rand_sleep(2, 4)
+
+    return rows
+
+
+def scrape_imot(context) -> list[dict]:
+    """Обхожда списъка с обяви (без да отваря всяка обява поотделно)."""
+    rows = []
+    page = context.new_page()
+
+    imot_logged_in = False
+    if IMOT_EMAIL and IMOT_PASSWORD:
+        print("  imot.bg: влизане в акаунт (за fe_agkinds филтъра)...")
+        try:
+            open_imot_login(page)
+            imot_logged_in = True
+            print("  imot.bg: вход успешен")
+        except Exception as e:
+            print(f"  imot.bg: неуспешен вход ({e}) — продължавам без fe_agkinds филтъра")
+
+    for deal_path, deal_label in IMOT_DEAL_PASSES:
+        base_url = f"https://www.imot.bg/obiavi/{deal_path}/grad-varna"
+
+        # fe_agkinds филтърът е потвърден само за продажби (виж README) — не
+        # го пробваме за наеми, за да не гадаем непроверено поведение там.
+        # Тези минавания вървят ПРЕДИ общото търсене по-долу — при
+        # дедупликация по линк в main() печели първото срещане на дадена
+        # обява, затова по-надеждният таг (от сайта) трябва да е първи.
+        if imot_logged_in and deal_path == "prodazhbi":
+            for agkind_val, seller_label, is_investor in IMOT_AGKIND_PASSES:
+                agkind_url = f"{base_url}?sort=2&fe_agkinds={agkind_val}~"
+                pass_label = f"{deal_label}/fe_agkinds={agkind_val}"
+                rows += _scrape_imot_pages(
+                    page, context, agkind_url, deal_label, pass_label,
+                    seller_override=seller_label, investor_override=is_investor,
+                )
+
+        # Общо търсене без филтър — покрива и всичко извън fe_agkinds
+        # категориите по-горе (обикновени агенции), и изцяло наемите.
+        rows += _scrape_imot_pages(page, context, base_url, deal_label, deal_label)
 
     page.close()
     print(f"  imot.bg: {len(rows)} обяви общо")
@@ -992,16 +1241,26 @@ def main():
     # ── Обединяване и почистване ──
     COLS = ["Цена","Площ_квм","Цена_на_квм","Локация","Описание",
             "Линк","Снимка_URL","Дата_обява","Източник","ID_обява",
-            "Спешност","Телефон","Тип_имот","Тип_продавач"]
+            "Спешност","Телефон","Тип_имот","Тип_продавач",
+            "Тип_сделка","Ново_строителство","От_инвеститор"]
 
     df = pd.DataFrame(all_rows, columns=COLS)
 
     if df.empty:
-        final_cols = ["Тип_имот","Тип_продавач","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                      "Описание","Източник","Снимка_URL","Дата_обява","Спешност"]
+        final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
+                      "Описание","Източник","Снимка_URL","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
         pd.DataFrame(columns=final_cols).to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
         print(f"\n⚠️ Няма намерени обяви → {OUTPUT_FILE}")
         return
+
+    # Приоритет на извора при дедупликация между сайтове — печели по-надеждният
+    # маркер за "Тип_продавач": OLX (филтър на ниво URL) > imot.bg (маркер
+    # ".seller" в картата) > ALO.bg (само по ключови думи в името на подателя).
+    # drop_duplicates(keep="first") пази реда си, затова сортираме по приоритет
+    # преди дедупликацията, вместо разчитайки на реда на скрейпване по-горе.
+    _SRC_PRIORITY = {"olx.bg": 0, "imot.bg": 1, "alo.bg": 2}
+    df["_src_priority"] = df["Източник"].map(site_from_link).map(_SRC_PRIORITY).fillna(9)
+    df = df.sort_values("_src_priority", kind="stable")
 
     # Дедупликация по линк
     df = df.drop_duplicates(subset=["Линк"])
@@ -1009,7 +1268,7 @@ def main():
     # Дедупликация между сайтове по цена + описание
     df["_desc_key"] = df["Описание"].str[:50].str.lower().str.strip()
     df = df.drop_duplicates(subset=["Цена", "_desc_key"])
-    df = df.drop(columns=["_desc_key"])
+    df = df.drop(columns=["_desc_key", "_src_priority"])
 
     # Числови типове
     df["Цена"]        = pd.to_numeric(df["Цена"],        errors="coerce").astype("Int64")
@@ -1020,17 +1279,40 @@ def main():
     mask = df["Цена_на_квм"].isna() & df["Цена"].notna() & df["Площ_квм"].notna()
     df.loc[mask, "Цена_на_квм"] = (df.loc[mask, "Цена"] / df.loc[mask, "Площ_квм"]).round(2)
 
-    # Маха обяви под наем, промъкнали се сред резултатите за продажба
+    # Допълнителна дедупликация по телефон + цена + площ — хваща една и съща
+    # обява, свалена и качена наново (нов линк/ID при продавача), или подадена
+    # едновременно на два сайта с леко различно описание, което е убягнало на
+    # дедупликацията по цена+описание по-горе. Изисква съвпадение и по цена,
+    # и по площ (не само телефон), за да не слепи различни имоти на агенция
+    # с общ офис номер, но случайно еднаква цена. Ползва само първия номер от
+    # "Телефон" (полето може да съдържа няколко, разделени с " | ").
+    # Пази реда с по-висок приоритет на извора (виж сортирането по-горе).
+    df["_phone_key"] = df["Телефон"].fillna("").astype(str).str.split("|").str[0].str.strip()
+    has_phone = df["_phone_key"] != ""
+    phone_dup_mask = has_phone & df.duplicated(subset=["_phone_key", "Цена", "Площ_квм"], keep="first")
+    n_phone_dup = int(phone_dup_mask.sum())
+    if n_phone_dup:
+        print(f"\n📞 Премахнати {n_phone_dup} допълнителни дубликата по телефон+цена+площ (вероятно свалена и пак качена обява)")
+    df = df[~phone_dup_mask].reset_index(drop=True)
+    df = df.drop(columns=["_phone_key"])
+
+    # По-рано тук трийхме изцяло обявите под наем, промъкнали се сред
+    # резултатите за продажба. Сега скрейпваме наеми директно (виж
+    # SELLER/DEAL_PASSES по-горе) и ги пазим, затова вместо да махаме такива
+    # редове, просто ги преетикетираме към "Тип_сделка"="наем" — при
+    # дедупликацията по-горе ще се слеят с реалните наемни резултати, ако
+    # съвпаднат по цена/описание.
     def _row_is_rent(row) -> bool:
         price = row["Цена"]
         price = None if pd.isna(price) else int(price)
         return is_rent_listing(row["Тип_имот"], price, str(row["Описание"]))
 
-    rent_mask = df.apply(_row_is_rent, axis=1)
-    n_rent = int(rent_mask.sum())
+    sale_mask = df["Тип_сделка"] == "продажба"
+    rent_leak_mask = sale_mask & df.apply(_row_is_rent, axis=1)
+    n_rent = int(rent_leak_mask.sum())
     if n_rent:
-        print(f"\n🏠 Премахнати {n_rent} обяви под наем, промъкнали се сред резултатите за продажба")
-    df = df[~rent_mask].reset_index(drop=True)
+        print(f"\n🏠 Преетикетирани {n_rent} обяви под наем, промъкнали се сред резултатите за продажба")
+    df.loc[rent_leak_mask, "Тип_сделка"] = "наем"
 
     # Нормализация на локацията (град Варна / гр. Варна / Варна → Варна;
     # Левски 1 / Левски 2 / Левски → Левски)
@@ -1040,8 +1322,8 @@ def main():
     df["Локация-район"] = df["Локация"]
     df["Цена_кв.м"] = df["Цена_на_квм"]
     df["Описание"] = df["Описание"].fillna("").map(lambda x: clean_text(strip_nav_junk(str(x)), 800))
-    final_cols = ["Тип_имот","Тип_продавач","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                  "Описание","Източник","Снимка_URL","Дата_обява","Спешност"]
+    final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
+                  "Описание","Източник","Снимка_URL","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
     df = df[final_cols]
 
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
@@ -1055,6 +1337,9 @@ def main():
     print(df["Източник"].map(site_from_link).value_counts().to_string())
     print(df["Тип_имот"].value_counts().to_string())
     print(df["Тип_продавач"].value_counts().to_string())
+    print(df["Тип_сделка"].value_counts().to_string())
+    print(f"Ново строителство: {int((df['Ново_строителство']=='YES').sum())}")
+    print(f"От инвеститор/строител: {int((df['От_инвеститор']=='YES').sum())}")
 
 
 if __name__ == "__main__":
