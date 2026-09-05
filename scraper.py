@@ -184,14 +184,33 @@ _CITY_VARIANTS_RE = re.compile(r'^\s*(?:гр\.?\s*|град\s+)?варна\s*$',
 # "Варна, Левски 2" трябва да се сведе до "Левски", както и "гр. Варна, Левски".
 _CITY_PREFIX_RE = re.compile(r'^(?:гр\.?\s*|град\s+)?варна\s*[,\-]?\s*', re.I)
 
+# Квартали, при които номерът на подрайона НЕ се маха (за разлика от
+# Левски/Чайка-тип масово обединяване) — потвърдено от потребителя, че
+# частите на Възраждане (1/2/3/4) и Младост (1/2) реално се различават
+# достатъчно (характер, цени), за да не се смесват в статистиките.
+_KEEP_DISTRICT_NUMBER = {"възраждане", "младост"}
+
+# "ЖК"/"КВ" пред името на квартал са различни изписвания на едно и също
+# нещо — обединяваме ги ("ЖК Чайка" / "КВ Чайка" → "Чайка"). "К.К."
+# (курортен комплекс) НЕ е същото — курортен комплекс е различна
+# местност от едноименния квартал (напр. "к.к. Чайка" ≠ кв. "Чайка"),
+# затова е отделно изключение по-долу, не се маха.
+_DISTRICT_PREFIX_RE = re.compile(r'^(?:ж\.?\s*к\.?|кв\.?)\s+', re.I)
+_RESORT_PREFIX_RE = re.compile(r'^к\.?\s*к\.?\s+', re.I)
+
 
 def normalize_location(loc: str) -> str:
     """Обединява различни изписвания на едно и също място:
     'град Варна' / 'гр. Варна' / 'гр.Варна' / 'Варна' → 'Варна';
+    'ЖК Чайка' / 'КВ Чайка' → 'Чайка' — но 'К.К. Чайка' (курортен
+    комплекс) е различна местност и НЕ се смесва с квартала;
     'Левски 1' / 'Левски 2' / 'Левски' → 'Левски' — номерът на подрайона
-    се маха по подразбиране, за консистентност в статистиките. Ако за
-    определени квартали номерът трябва да се пази отделно, редакторът на
-    тази функция е точното място за изключение."""
+    се маха по подразбиране, за консистентност в статистиките, ОСВЕН за
+    кварталите в _KEEP_DISTRICT_NUMBER (виж отгоре). Курортни местности
+    извън Варна община (к.к. Чайка, к.к. Св.Св. Константин и Елена и
+    др., административно в Аксаково) умишлено се пазят под Варна тук —
+    за жителите/клиентите се броят за "Варна и околност", независимо от
+    общинската граница."""
     if not loc:
         return loc
     loc = clean_text(loc)
@@ -200,7 +219,19 @@ def normalize_location(loc: str) -> str:
     loc = _CITY_PREFIX_RE.sub('', loc).strip()
     if not loc:
         return "Варна"
-    loc = re.sub(r'\s+\d{1,2}$', '', loc).strip()
+
+    if _RESORT_PREFIX_RE.match(loc):
+        rest = _RESORT_PREFIX_RE.sub('', loc).strip()
+        return f"к.к. {rest}" if rest else loc
+
+    loc = _DISTRICT_PREFIX_RE.sub('', loc).strip()
+    if not loc:
+        return "Варна"
+
+    base = re.sub(r'\s+\d{1,2}$', '', loc).strip()
+    if base.lower() not in _KEEP_DISTRICT_NUMBER:
+        loc = base
+
     return loc or "Варна"
 
 
@@ -396,28 +427,42 @@ def open_olx_login(page):
 
 
 def open_imot_login(page):
-    """Best-effort вход в imot.bg с имейл/парола (IMOT_EMAIL/IMOT_PASSWORD).
-    Нужен е само за да ползваме fe_agkinds филтъра (частни лица/строителни
-    фирми/инвеститори — виж IMOT_AGKIND_PASSES) — без логин скрейпърът пак
+    """Вход в imot.bg с имейл/парола (IMOT_EMAIL/IMOT_PASSWORD). Нужен е
+    само за да ползваме fe_agkinds филтъра (частни лица/строителни фирми/
+    инвеститори — виж IMOT_AGKIND_PASSES) — без логин скрейпърът пак
     работи нормално, просто без този филтър (fallback към евристиката по
     текст/маркер, както досега).
 
-    Селекторите тук са best-effort по същия модел като open_olx_login() —
-    пробват няколко варианта, не са потвърдени "на живо" срещу реалната
-    форма за вход (виж README, "Известни ограничения"), защото не сме
-    рискували да разлогваме активна сесия по време на разработка. Ако не
-    сработят, вдига грешка и scrape_imot() просто продължава без филтъра.
+    Селекторите по-долу са потвърдени от debug артефакт на реален неуспешен
+    run (imot_login_debug.html/png), не са само предположение:
+    1. imot.bg използва CookieScript.com за бисквитки — банерът покрива
+       цялата страница, докато не се кликне #cookiescript_accept (не е
+       OneTrust, затова старите селектори не хващаха нищо).
+    2. Формата за вход е вградена в началната страница (<login id=
+       "NewLoginPop">), но полетата ѝ (usr/pwd) стоят disabled, докато не
+       се избере радио бутон "logtype" — 1 = За агенции, 2 = За частни
+       лица. Служебният акаунт на потребителя е регистриран "За агенции"
+       (logtype=1) — потвърдено от него, не предположение.
+    3. Реалните имена на полетата са name="usr" / name="pwd" (не generic
+       "email"/"username"/"password"), а бутонът за вход е <button
+       class="loginButton">.
+    Ако въпреки това нещо се промени на сайта, вдига грешка и
+    scrape_imot() просто продължава без филтъра.
     """
     page.goto(IMOT_LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
     rand_sleep(1, 2)
 
     click_first(page, [
+        "#cookiescript_accept",
+        "#cookiescript_reject",
         "#onetrust-accept-btn-handler",
         "button[id*='accept']",
+        "button:has-text('Приемете всички')",
         "button:has-text('Приемам')",
         "button:has-text('Съгласен')",
         "button:has-text('Разбрах')",
-    ], timeout=2500)
+    ], timeout=4000)
+    rand_sleep(0.5, 1)
 
     if not has_login_form(page):
         click_first(page, [
@@ -429,7 +474,16 @@ def open_imot_login(page):
         ], timeout=6000)
         rand_sleep(1, 2)
 
+    # Отключва usr/pwd полетата (стоят в disabled wrapper, докато не се
+    # избере тип акаунт). logtype=1 → "За агенции" (служебният акаунт).
+    click_first(page, [
+        'input[name="logtype"][value="1"]',
+        'input[name="logtype"]',
+    ], timeout=3000)
+    rand_sleep(0.4, 0.8)
+
     email_filled = fill_first(page, [
+        'input[name="usr"]',
         'input[name="username"]',
         'input[name="email"]',
         'input[type="email"]',
@@ -447,6 +501,8 @@ def open_imot_login(page):
     rand_sleep(0.5, 1)
 
     password_filled = fill_first(page, [
+        'input[name="pwd"]',
+        '#passwordfield',
         'input[name="password"]',
         'input[type="password"]',
         'input[id*="pass"]',
@@ -458,6 +514,7 @@ def open_imot_login(page):
 
     rand_sleep(0.5, 1)
     clicked_submit = click_first(page, [
+        'button.loginButton',
         'button[type="submit"]',
         'input[type="submit"]',
         "button:has-text('Вход')",
@@ -479,9 +536,20 @@ def open_imot_login(page):
         save_debug_page(page, "imot_login_debug")
         raise RuntimeError("imot.bg отказа входа или показа captcha/anti-bot проверка")
 
-    if has_login_form(page):
+    # ЗАБЕЛЕЖКА: НЕ ползваме has_login_form() тук — формата за вход на
+    # imot.bg е вградена в страницата постоянно (SPA-стил popup), полето
+    # за парола си стои в DOM-а дори след успешен вход (само визуално
+    # скрито), затова би давало фалшив "неуспех" почти винаги. Търсим
+    # позитивен сигнал за успешен вход — линк "Изход" в горното меню —
+    # чрез locator (по-точно от груб текст-search в цялата страница).
+    logged_in = False
+    try:
+        logged_in = page.locator('a:has-text("Изход")').count() > 0
+    except Exception:
+        pass
+    if not logged_in:
         save_debug_page(page, "imot_login_debug")
-        raise RuntimeError("imot.bg: формата за вход още стои на екрана — вероятно неуспешен вход")
+        raise RuntimeError("imot.bg: не виждам линк 'Изход' след опита за вход — вероятно неуспешен вход")
 
 
 def save_debug_page(page, name: str):
@@ -997,8 +1065,19 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             rand_sleep(1, 2)
         except PwTimeout:
-            print("  imot.bg: timeout")
-            break
+            # Единичен timeout (особено на стр.1) не бива да гърми цялото
+            # минаване — пробваме веднъж пак, преди да се откажем от тази
+            # категория/pass (виж run #61: продажбите пропаднаха изцяло
+            # заради timeout точно на стр.1, без повторен опит).
+            print("  imot.bg: timeout, повторен опит...")
+            rand_sleep(2, 4)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                rand_sleep(1, 2)
+            except PwTimeout:
+                print("  imot.bg: timeout пак — прескачам")
+                break
 
         cards = page.query_selector_all(".ads2023 > div.item")
         if not cards:
