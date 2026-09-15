@@ -1,3 +1,4 @@
 pandas
 playwright
 beautifulsoup4
+requests
