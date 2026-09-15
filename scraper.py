@@ -12,6 +12,8 @@ import pandas as pd
 import sys
 import json
 import base64
+import requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 
@@ -1261,6 +1263,98 @@ def scrape_imot(context) -> list[dict]:
 # ГЛАВНА ФУНКЦИЯ
 # ══════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════
+# СНИМКИ (само заглавна) — сваляне и локално съхранение в data/photos/
+# ══════════════════════════════════════════════════════════════════
+PHOTOS_DIR = "data/photos"
+MAX_NEW_PHOTOS_PER_RUN = int(os.environ.get("MAX_NEW_PHOTOS_PER_RUN", "400"))
+PHOTO_DOWNLOAD_TIMEOUT = 8
+PHOTO_MAX_BYTES = 700_000  # предпазна мярка срещу подозрително големи файлове
+
+
+def _photo_local_name(key: str) -> str:
+    h = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    return f"{h}.jpg"
+
+
+def download_cover_photos(df: "pd.DataFrame"):
+    """
+    Сваля само ЗАГЛАВНАТА снимка на всяка обява (по колона "Снимка_URL")
+    в data/photos/ — не цялата галерия. Правим това, защото директният
+    хотлинк към CDN-овете на изходните сайтове не се показва в дашборда
+    (блокиран от CSP там), а GitHub Actions runner-ите имат нормален
+    интернет достъп, докато облачната среда на Claude няма достъп до
+    тези CDN хостове.
+
+    Предпазни мерки за да не удари GitHub Actions timeout-а (180 мин):
+      - ако локалният файл вече съществува от предишен run, не сваля
+        повторно — обявите, които стоят активни няколко дни, не бият
+        мрежата всеки път;
+      - лимит MAX_NEW_PHOTOS_PER_RUN нови сваляния на run — остатъкът
+        се доверсва в следващите дни;
+      - паралелно сваляне (ThreadPoolExecutor), кратък timeout по обява;
+      - всяка грешка по отделна снимка се поглъща тихо — никога не
+        трябва да събори целия scrape.
+
+    Връща pd.Series (същия индекс като df) с релативен път
+    ("data/photos/xxxx.jpg") или "" при липса/неуспех.
+    """
+    os.makedirs(PHOTOS_DIR, exist_ok=True)
+    result = pd.Series([""] * len(df), index=df.index, dtype="object")
+    to_fetch = []
+
+    for idx, row in df.iterrows():
+        url = row.get("Снимка_URL")
+        if not url or (isinstance(url, float) and pd.isna(url)):
+            continue
+        url = str(url).strip()
+        if not url.startswith("http"):
+            continue
+        local_name = _photo_local_name(str(row.get("Линк") or url))
+        local_path = f"{PHOTOS_DIR}/{local_name}"
+        if os.path.exists(local_path):
+            result.at[idx] = local_path
+            continue
+        to_fetch.append((idx, url, local_path))
+
+    if not to_fetch:
+        return result
+
+    batch = to_fetch[:MAX_NEW_PHOTOS_PER_RUN]
+    skipped = len(to_fetch) - len(batch)
+
+    def _fetch_one(item):
+        idx, url, local_path = item
+        try:
+            resp = requests.get(
+                url, timeout=PHOTO_DOWNLOAD_TIMEOUT,
+                headers={"User-Agent": random.choice(USER_AGENTS)},
+            )
+            if resp.status_code != 200:
+                return idx, None
+            content = resp.content
+            if not content or len(content) > PHOTO_MAX_BYTES:
+                return idx, None
+            with open(local_path, "wb") as f:
+                f.write(content)
+            return idx, local_path
+        except Exception:
+            return idx, None
+
+    ok = 0
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for idx, local_path in pool.map(_fetch_one, batch):
+            if local_path:
+                result.at[idx] = local_path
+                ok += 1
+
+    msg = f"\n🖼️  Заглавни снимки: {ok}/{len(batch)} нови свалени успешно"
+    if skipped:
+        msg += f" (пропуснати {skipped} — над лимита за този run, ще се доверсват следващия път)"
+    print(msg)
+    return result
+
+
 def main():
     all_rows = []
 
@@ -1327,7 +1421,7 @@ def main():
 
     if df.empty:
         final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                      "Описание","Източник","Снимка_URL","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
+                      "Описание","Източник","Снимка_URL","Снимка_локална","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
         pd.DataFrame(columns=final_cols).to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
         print(f"\n⚠️ Няма намерени обяви → {OUTPUT_FILE}")
         return
@@ -1401,8 +1495,10 @@ def main():
     df["Локация-район"] = df["Локация"]
     df["Цена_кв.м"] = df["Цена_на_квм"]
     df["Описание"] = df["Описание"].fillna("").map(lambda x: clean_text(strip_nav_junk(str(x)), 800))
-    final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                  "Описание","Източник","Снимка_URL","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
+        df["Снимка_локална"] = download_cover_photos(df)
+
+final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
+                  "Описание","Източник","Снимка_URL","Снимка_локална","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
     df = df[final_cols]
 
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
