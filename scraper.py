@@ -1058,7 +1058,8 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
         if current_page == 1:
             url = base_url
         elif "?" in base_url:
-            url = f"{base_url}&p={current_page}"
+            path, query = base_url.split("?", 1)
+            url = f"{path}/p-{current_page}?{query}"
         else:
             url = f"{base_url}/p-{current_page}?sort=2"
         print(f"  imot.bg/{pass_label} стр.{current_page}")
