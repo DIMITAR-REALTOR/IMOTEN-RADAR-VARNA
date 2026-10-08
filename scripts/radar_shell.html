@@ -1,0 +1,1037 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><meta name="robots" content="noindex,nofollow"><script>try{if(localStorage.getItem('radar-pin-ok')==='1'){window.__pgUnlocked=true}else{document.documentElement.classList.add('pg-locked')}}catch(e){document.documentElement.classList.add('pg-locked')}</script><style>html.pg-locked body>*:not(#pg-overlay){display:none!important}#pg-overlay{position:fixed;inset:0;background:#faf9f5;display:flex;align-items:center;justify-content:center;z-index:99999;font:14px -apple-system,BlinkMacSystemFont,sans-serif}#pg-box{background:#fff;border:1px solid #e5e3da;border-radius:10px;padding:28px 24px;width:260px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}#pg-box .pg-title{font-weight:600;margin-bottom:4px}#pg-box .pg-sub{color:#6b6a63;font-size:12px;margin-bottom:10px}#pg-box input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d8d5c9;border-radius:6px;font-size:16px;text-align:center;margin-bottom:10px}#pg-box button{width:100%;padding:10px;border:0;border-radius:6px;background:#141413;color:#fff;font-size:14px;cursor:pointer}#pg-err{color:#b3432b;font-size:12px;min-height:16px;margin-top:6px}</style></head><body><div id="pg-overlay"><div id="pg-box"><div class="pg-title">Имотен радар · Варна</div><div class="pg-sub">Въведи PIN за достъп</div><input id="pg-pin" type="password" inputmode="numeric" autocomplete="off"><button id="pg-go">Влез</button><div id="pg-err"></div></div></div><script>(function(){if(window.__pgUnlocked){var o=document.getElementById('pg-overlay');if(o)o.remove();return}var PIN='radar',KEY='radar-pin-ok';function unlock(){document.documentElement.classList.remove('pg-locked');var o=document.getElementById('pg-overlay');if(o)o.remove()}var inp=document.getElementById('pg-pin'),btn=document.getElementById('pg-go'),err=document.getElementById('pg-err');function tryUnlock(){if(inp.value===PIN){try{localStorage.setItem(KEY,'1')}catch(e){}unlock()}else{err.textContent='Грешен PIN';inp.value='';inp.focus()}}btn.addEventListener('click',tryUnlock);inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();tryUnlock()}});inp.focus()})();</script>
+<title>Имотен радар · Варна</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface-2:#1c2230; --border:#21262d; --border-2:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --faint:#586069;
+    --accent:#58a6ff; --accent-strong:#1f6feb;
+    --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    --imot:#58a6ff; --olx:#d29922; --alo:#a371f7;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:var(--sans);
+    font-size:14px; line-height:1.5;
+  }
+  ::selection{ background:var(--accent); color:#fff; }
+  a{ color:var(--accent); }
+
+  .wrap{ max-width:1220px; margin:0 auto; padding:28px 24px 60px; }
+
+  /* ── HEADER ─────────────────────────────────────────────── */
+  header{
+    display:flex; align-items:flex-start; justify-content:space-between; gap:20px;
+    padding-bottom:20px; margin-bottom:22px; border-bottom:1px solid var(--border);
+  }
+  .brand h1{
+    font-family:var(--mono); font-size:21px; font-weight:600; color:var(--accent);
+    letter-spacing:-.3px; margin:0 0 4px;
+  }
+  .brand .sub{ font-size:12px; color:var(--muted); font-family:var(--mono); }
+  .badge{
+    background:var(--surface); border:1px solid var(--border-2); border-radius:8px;
+    padding:8px 14px; font-family:var(--mono); font-size:10.5px; color:var(--muted);
+    text-align:right; line-height:1.7; white-space:nowrap;
+  }
+  .badge b{ color:var(--text); }
+
+  /* ── POOL TABS ──────────────────────────────────────────── */
+  .pool-tabs{ display:flex; gap:20px; margin-bottom:18px; border-bottom:1px solid var(--border); }
+  .pool-tabs button{
+    background:transparent; border:none; border-bottom:2px solid transparent;
+    color:var(--muted); font-family:var(--mono); font-size:12.5px; text-transform:uppercase;
+    letter-spacing:.5px; padding:0 2px 10px; cursor:pointer;
+  }
+  .pool-tabs button:hover{ color:var(--text); }
+  .pool-tabs button.active{ color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+
+  /* ── STAT CARDS ─────────────────────────────────────────── */
+  .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:22px; }
+  .stat{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:14px 14px 12px;
+  }
+  .stat .num{
+    font-family:var(--mono); font-size:24px; font-weight:600; line-height:1;
+    color:var(--text); font-variant-numeric:tabular-nums; margin-bottom:6px;
+  }
+  .stat.good .num{ color:var(--good); }
+  .stat.warn .num{ color:var(--warn); }
+  .stat.bad .num{ color:var(--bad); }
+  .stat.accent .num{ color:var(--accent); }
+  .stat .lbl{ font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; }
+
+  /* ── PANELS ─────────────────────────────────────────────── */
+  .row2{ display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-bottom:22px; align-items:stretch; }
+  .row3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:22px; align-items:stretch; }
+  .panel{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:18px 20px;
+  }
+  .panel h2{
+    font-family:var(--mono); font-size:12px; text-transform:uppercase; letter-spacing:.8px;
+    color:var(--muted); margin:0 0 12px; font-weight:600;
+  }
+  .panel h2 .hint{
+    text-transform:none; letter-spacing:0; font-weight:400; font-size:11px; color:var(--muted); opacity:.75;
+  }
+  .scroll-list{ max-height:340px; overflow-y:auto; padding-right:4px; }
+  .scroll-list::-webkit-scrollbar{ width:6px; }
+  .scroll-list::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
+
+  /* ── PAGER ────────────────────────────────────────────────── */
+  .pager{ display:flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap; padding:16px 0 4px; }
+  .pager button{
+    font-family:var(--mono); font-size:11.5px; min-width:30px; height:30px; padding:0 8px;
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    border-radius:6px; cursor:pointer;
+  }
+  .pager button:hover:not(:disabled){ border-color:var(--accent); color:var(--accent); }
+  .pager button.active{ background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .pager button:disabled{ opacity:.35; cursor:default; }
+  .pager .pager-gap{ color:var(--muted); font-family:var(--mono); font-size:11.5px; padding:0 2px; }
+  .findings{ display:grid; grid-template-columns:1fr 1fr; gap:10px 22px; }
+  .finding{ display:flex; gap:9px; align-items:flex-start; font-size:12.5px; }
+  .finding .dot{ flex:0 0 auto; width:8px; height:8px; border-radius:50%; margin-top:5px; }
+  .finding .dot.good{ background:var(--good); }
+  .finding .dot.warn{ background:var(--warn); }
+  .finding .dot.bad{ background:var(--bad); }
+  .finding p{ margin:0; color:var(--text); }
+  .finding .note{ color:var(--muted); }
+
+  /* ── CHART ──────────────────────────────────────────────── */
+  .chart-wrap svg{ width:100%; height:auto; overflow:visible; }
+  .chart-axis{ font-family:var(--mono); font-size:9.5px; fill:var(--muted); }
+  .chart-line{ fill:none; stroke:var(--accent); stroke-width:2; }
+  .chart-area{ fill:var(--accent); opacity:.10; }
+  .chart-dot{ fill:var(--accent); }
+  .chart-dot.end{ fill:var(--good); }
+  .chart-grid{ stroke:var(--border); stroke-width:1; }
+  .chart-label{ font-family:var(--mono); font-size:10px; fill:var(--text); font-weight:600; }
+  .chart-cap{ font-size:11px; color:var(--muted); margin-top:8px; }
+
+  /* ── BAR LISTS (type / district price rankings) ─────────── */
+  .bar-list{ display:flex; flex-direction:column; gap:9px; }
+  .bar-row{ display:grid; grid-template-columns:84px 1fr auto; gap:10px; align-items:center; font-size:12px; }
+  .bar-row .name{ color:var(--text); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-track{ position:relative; height:7px; background:var(--surface-2); border-radius:4px; overflow:hidden; }
+  .bar-fill{ position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:4px; }
+  .bar-val{ font-family:var(--mono); font-size:11.5px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .bar-val b{ color:var(--text); }
+
+  .drop-list{ display:flex; flex-direction:column; gap:2px; }
+  .drop-row{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:8px 0; border-bottom:1px solid var(--border); font-size:12px;
+  }
+  .drop-row:last-child{ border-bottom:none; }
+  .drop-row a{ color:var(--text); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+  .drop-row a:hover{ color:var(--accent); }
+  .drop-row .meta{ color:var(--muted); font-size:11px; }
+  .drop-row .pct{
+    font-family:var(--mono); font-weight:700; color:var(--bad); white-space:nowrap; flex:0 0 auto;
+  }
+
+  /* ── FILTER BAR ─────────────────────────────────────────── */
+  .filters{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+  .filters select, .filters input[type="text"]{
+    background:var(--surface); border:1px solid var(--border-2); color:var(--text);
+    font-family:var(--sans); font-size:12.5px; padding:7px 10px; border-radius:7px; outline:none;
+  }
+  .filters select:focus, .filters input:focus{ border-color:var(--accent); }
+  .filters input[type="text"]{ min-width:190px; }
+  .chip-toggle{ display:flex; gap:6px; background:var(--surface); border:1px solid var(--border-2); border-radius:7px; padding:3px; }
+  .chip-toggle button{
+    background:transparent; border:none; color:var(--muted); font-family:var(--sans);
+    font-size:12px; padding:5px 11px; border-radius:5px; cursor:pointer;
+  }
+  .chip-toggle button.active{ background:var(--accent-strong); color:#fff; }
+  .result-count{ margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .pdf-btn{
+    background:var(--surface); border:1px solid var(--border-2); color:var(--text);
+    font-family:var(--sans); font-size:12px; padding:7px 12px; border-radius:7px;
+    cursor:pointer; display:flex; align-items:center; gap:6px;
+  }
+  .pdf-btn:hover:not(:disabled){ border-color:var(--accent); color:var(--accent); }
+  .pdf-btn:disabled{ opacity:.55; cursor:default; }
+
+  /* ── TABLE ──────────────────────────────────────────────── */
+  .table-scroll{ overflow-x:auto; border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+  table{ width:100%; border-collapse:collapse; font-size:12.3px; min-width:1080px; }
+  thead th{
+    position:sticky; top:0; background:var(--surface-2); text-align:left;
+    padding:10px 11px; font-family:var(--mono); font-size:10px; text-transform:uppercase;
+    letter-spacing:.5px; color:var(--muted); border-bottom:1px solid var(--border-2);
+    cursor:pointer; user-select:none; white-space:nowrap;
+  }
+  thead th:hover{ color:var(--text); }
+  thead th .arrow{ opacity:.5; margin-left:2px; }
+  tbody tr{ border-bottom:1px solid var(--border); }
+  tbody tr:last-child{ border-bottom:none; }
+  tbody tr:hover{ background:var(--surface-2); }
+  tbody tr.inactive{ opacity:.55; }
+  tbody td{ padding:9px 11px; vertical-align:top; color:var(--text); }
+  td.num{ font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  td.loc{ max-width:150px; }
+  td.desc{ max-width:280px; color:var(--muted); line-height:1.45; }
+  td.desc a.clip{
+    color:var(--text); text-decoration:none; font-weight:400;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  td.desc a.clip:hover{ color:var(--accent); }
+  td.hist{ font-family:var(--mono); font-size:11px; color:var(--muted); white-space:nowrap; }
+
+  .src-pill{
+    font-family:var(--mono); font-size:10px; font-weight:600; padding:2px 7px;
+    border-radius:5px; white-space:nowrap; letter-spacing:.3px;
+  }
+  .src-pill.imot{ background:color-mix(in srgb, var(--imot) 16%, transparent); color:var(--imot); }
+  .src-pill.olx{ background:color-mix(in srgb, var(--olx) 16%, transparent); color:var(--olx); }
+  .src-pill.alo{ background:color-mix(in srgb, var(--alo) 16%, transparent); color:var(--alo); }
+
+  .tag{
+    display:inline-block; font-family:var(--mono); font-size:9.5px; font-weight:600;
+    padding:2px 6px; border-radius:4px; margin-right:4px; margin-bottom:3px; letter-spacing:.3px;
+    white-space:nowrap;
+  }
+  .tag.rent{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+  .tag.urgent{ background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
+  .tag.new{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .tag.active{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .tag.gone{ background:color-mix(in srgb, var(--faint) 20%, transparent); color:var(--faint); }
+  .tag.drop{ background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
+  .tag.relisted{ background:color-mix(in srgb, var(--warn) 16%, transparent); color:var(--warn); }
+  .tag.investor{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+  .tag.newbuild{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .tag.deal{ background:color-mix(in srgb, var(--good) 20%, transparent); color:var(--good); }
+  .tag.top3{ background:color-mix(in srgb, var(--warn) 22%, transparent); color:var(--warn); }
+  .thumb{ width:56px; height:40px; object-fit:cover; border-radius:4px; display:block; background:var(--surface-2); }
+  .thumb-empty{ width:56px; height:40px; border-radius:4px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:9px; }
+
+  .phone{ font-family:var(--mono); }
+  .phone.empty{ color:var(--faint); }
+
+  footer{
+    margin-top:26px; padding-top:16px; border-top:1px solid var(--border);
+    display:flex; justify-content:space-between; font-size:10.5px; color:var(--faint);
+    font-family:var(--mono);
+  }
+
+  .seller-compare{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .seller-box{ border:1px solid var(--border); border-radius:9px; padding:14px 16px; background:var(--surface-2); }
+  .seller-box .who{ font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:8px; }
+  .seller-box .big{ font-family:var(--mono); font-size:25px; font-weight:600; color:var(--text); line-height:1; margin-bottom:4px; font-variant-numeric:tabular-nums; }
+  .seller-box .sub{ font-size:11.5px; color:var(--muted); }
+  .seller-box.agency .big{ color:var(--accent); }
+  .seller-box.private .big{ color:var(--good); }
+  .seller-note{ margin-top:10px; font-size:11.5px; color:var(--muted); text-align:center; }
+  .src-pill.seller-private{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .src-pill.seller-agency{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+
+  @media (max-width:900px){
+    .stats{ grid-template-columns:repeat(3,1fr); }
+    .seller-compare{ grid-template-columns:1fr; }
+    .row2{ grid-template-columns:1fr; }
+    .row3{ grid-template-columns:1fr; }
+    .findings{ grid-template-columns:1fr; }
+    header{ flex-direction:column; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>Имотен радар · Варна</h1>
+      <div class="sub">Димитър Ценов — Нов Век · Нови Възможности, Варна</div>
+    </div>
+    <div class="badge">
+      IMOT.BG · OLX · ALO.BG<br>
+      Обхванат период: <b id="run-range">—</b><br>
+      <b id="run-count">—</b> обхода обединени в тази таблица
+    </div>
+  </header>
+
+  <div class="pool-tabs" id="pool-tabs">
+    <button data-pool="sale" class="active">Продажби</button>
+    <button data-pool="rent">Наеми</button>
+  </div>
+
+  <div class="filters" style="margin-bottom:18px;">
+    <div class="chip-toggle" id="f-focus">
+      <button data-v="апартамент" class="active">Апартаменти</button>
+      <button data-v="business">Бизнес имоти</button>
+      <button data-v="all">Всички типове</button>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="row2">
+    <div class="panel">
+      <h2>Анализ на цялата история</h2>
+      <div class="findings" id="findings"></div>
+    </div>
+    <div class="panel">
+      <h2 id="chart-title">Медианна €/кв.м за апартаменти по месеци</h2>
+      <select id="f-chart-district" style="margin-bottom:10px;background:var(--surface);border:1px solid var(--border-2);color:var(--text);font-family:var(--sans);font-size:12px;padding:5px 9px;border-radius:6px;"></select>
+      <div class="chart-wrap" id="chart"></div>
+      <div class="chart-cap" id="chart-cap"></div>
+    </div>
+  </div>
+
+  <div class="row3">
+    <div class="panel">
+      <h2 id="type-title">Медианна цена по тип имот <span class="hint">(апартаментите — по брой стаи)</span></h2>
+      <div class="bar-list scroll-list" id="type-stats"></div>
+    </div>
+    <div class="panel">
+      <h2 id="district-title">Апартаменти по квартал <span class="hint">(медианна цена и €/кв.м)</span></h2>
+      <div class="bar-list scroll-list" id="district-stats"></div>
+    </div>
+    <div class="panel">
+      <h2>Топ намаления на цена</h2>
+      <div class="drop-list" id="drop-list"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-matrix" style="margin-bottom:22px;">
+    <h2>Медиана по квартал и брой стаи <span class="hint">— апартаменти, само комбинации с ≥3 обяви</span></h2>
+    <div class="filters" style="margin-bottom:12px;">
+      <select id="f-matrix-room"></select>
+    </div>
+    <div class="bar-list scroll-list" id="matrix-stats"></div>
+  </div>
+
+  <div class="panel" id="panel-seller" style="margin-bottom:22px;">
+    <h2>Частни лица <span class="hint">срещу</span> Агенции <span class="hint" id="seller-compare-hint">— апартаменти, медианна цена/кв.м</span></h2>
+    <div class="seller-compare" id="seller-compare"></div>
+    <div class="seller-note" id="seller-note"></div>
+  </div>
+
+  <div class="filters">
+    <div class="chip-toggle" id="f-status">
+      <button data-v="all" class="active">Всички</button>
+      <button data-v="active">Само активни сега</button>
+      <button data-v="drop">Само с намалена цена</button>
+    </div>
+    <div class="chip-toggle" id="f-seller">
+      <button data-v="all" class="active">Продавач: всички</button>
+      <button data-v="частно лице">Частни</button>
+      <button data-v="агенция">Агенции</button>
+    </div>
+    <div class="chip-toggle" id="f-invest">
+      <button data-v="all" class="active">Инвеститор: всички</button>
+      <button data-v="yes">Само от инвеститор</button>
+    </div>
+    <select id="f-src">
+      <option value="all">Всички източници</option>
+      <option value="IMOT.BG">IMOT.BG</option>
+      <option value="OLX">OLX</option>
+      <option value="ALO.BG">ALO.BG</option>
+    </select>
+    <select id="f-tip">
+      <option value="all">Всички типове</option>
+    </select>
+    <select id="f-phone">
+      <option value="all">Телефон: всички</option>
+      <option value="yes">Само с телефон</option>
+    </select>
+    <input type="text" id="f-search" placeholder="Търси по локация или описание…">
+    <div class="result-count" id="result-count"></div>
+    <button class="pdf-btn" id="pdf-btn" type="button" hidden>⤓ PDF (тази страница)</button>
+  </div>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Снимка</th>
+          <th data-sort="tip">Тип</th>
+          <th data-sort="loc">Локация</th>
+          <th data-sort="sqm">Площ <span class="arrow">↕</span></th>
+          <th data-sort="price">Цена <span class="arrow">↕</span></th>
+          <th data-sort="ppm">€/кв.м <span class="arrow">↕</span></th>
+          <th>Статус</th>
+          <th data-sort="timesSeen">Обходи <span class="arrow">↕</span></th>
+          <th data-sort="daysSpan">На пазара <span class="arrow">↕</span></th>
+          <th data-sort="phone">Телефон</th>
+          <th data-sort="src">Извор</th>
+          <th data-sort="seller">Продавач</th>
+          <th>Обява</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pager" id="pager"></div>
+
+  <footer>
+    <span>Имотен радар · Нов Век · Нови Възможности — обединен обход на OLX.bg, IMOT.bg и ALO.bg, дедуплициран по линк на обявата</span>
+    <span>0889 099 118 · novvek.bg</span>
+  </footer>
+
+</div>
+
+<script type="application/json" id="raw-data">__RAW_DATA_JSON__</script>
+<script type="application/json" id="trend-data">[{"month": "2026-04", "median": 2194.44, "n": 39}, {"month": "2026-05", "median": 2293.44, "n": 71}, {"month": "2026-06", "median": 2291.65, "n": 33}, {"month": "2026-07", "median": 2052.63, "n": 41}, {"month": "2026-08", "median": 2097.22, "n": 24}, {"month": "2026-09", "median": 2253.44, "n": 38}]</script>
+<script type="application/json" id="meta-data">__META_DATA_JSON__</script>
+<script type="application/json" id="more-stats-data">{"district_stats": [{"district": "Фестивален комплекс", "median": 3342.86, "n": 6}, {"district": "Общината", "median": 3155.84, "n": 4}, {"district": "Гръцка махала", "median": 3143.93, "n": 22}, {"district": "Чаталджа", "median": 3025.21, "n": 5}, {"district": "м-т Евксиноград", "median": 3012.05, "n": 5}, {"district": "Чайка", "median": 2999.23, "n": 26}, {"district": "Окръжна болница", "median": 2967.16, "n": 2}, {"district": "Спортна зала", "median": 2906.82, "n": 6}, {"district": "Генералите", "median": 2896.55, "n": 3}, {"district": "Базар Левски", "median": 2840.0, "n": 5}, {"district": "ВИНС-Червен площад", "median": 2738.41, "n": 6}, {"district": "Център, Варна", "median": 2675.77, "n": 2}, {"district": "Бриз, Варна", "median": 2666.67, "n": 3}, {"district": "Окръжна болница-Генерали", "median": 2665.0, "n": 11}, {"district": "Централна поща", "median": 2654.44, "n": 8}, {"district": "к.к. Св.Св. Константин и Елена", "median": 2644.55, "n": 40}, {"district": "Победа", "median": 2642.61, "n": 10}, {"district": "Център", "median": 2634.88, "n": 53}, {"district": "Завод Дружба", "median": 2542.55, "n": 5}, {"district": "Гранд Мол", "median": 2512.56, "n": 13}, {"district": "Операта", "median": 2392.31, "n": 4}, {"district": "Лятно кино Тракия", "median": 2374.88, "n": 27}, {"district": "м", "median": 2373.47, "n": 16}, {"district": "Бриз", "median": 2368.54, "n": 64}, {"district": "Конфуто", "median": 2338.71, "n": 9}, {"district": "Свети Никола", "median": 2302.05, "n": 6}, {"district": "Възраждане 3", "median": 2293.44, "n": 5}, {"district": "Колхозен пазар", "median": 2267.31, "n": 23}, {"district": "Бизнес хотел", "median": 2261.86, "n": 4}, {"district": "к.к. Чайка", "median": 2213.11, "n": 11}, {"district": "Гранд Мол Варна", "median": 2178.95, "n": 4}, {"district": "Трошево", "median": 2133.63, "n": 42}, {"district": "Погреби", "median": 2102.11, "n": 18}, {"district": "м-т Горна Трака", "median": 2101.95, "n": 7}, {"district": "Младост 1", "median": 2096.36, "n": 6}, {"district": "Автогара", "median": 2085.65, "n": 12}, {"district": "Христо Ботев", "median": 2063.49, "n": 3}, {"district": "Цветен квартал", "median": 2056.81, "n": 24}, {"district": "Галата", "median": 2043.01, "n": 11}, {"district": "Левски", "median": 2042.66, "n": 44}, {"district": "Възраждане 1", "median": 2037.74, "n": 9}, {"district": "Зимно кино Тракия", "median": 1993.08, "n": 6}, {"district": "Младост", "median": 1988.51, "n": 35}, {"district": "ХЕИ", "median": 1939.09, "n": 11}, {"district": "м-т Зеленика", "median": 1923.11, "n": 2}, {"district": "Възраждане", "median": 1855.72, "n": 58}, {"district": "м-т Долна Трака", "median": 1844.28, "n": 4}, {"district": "м-т Ален мак", "median": 1833.34, "n": 12}, {"district": "м-т Пчелина", "median": 1816.36, "n": 7}, {"district": "Виница", "median": 1787.13, "n": 53}, {"district": "Изгрев", "median": 1779.49, "n": 7}, {"district": "Владислав Варненчик", "median": 1719.12, "n": 47}, {"district": "Аспарухово", "median": 1716.3, "n": 39}, {"district": "Младост 2", "median": 1666.67, "n": 5}, {"district": "Кайсиева градина", "median": 1605.82, "n": 60}, {"district": "к.к. Златни пясъци", "median": 1526.32, "n": 21}, {"district": "Виница, Варна", "median": 1481.36, "n": 4}, {"district": "Погребите, Варна", "median": 1382.05, "n": 2}]}</script>
+<script type="application/json" id="more-stats2-data">{"type_stats_fine": [{"tip": "тристаен", "median": 197000.0, "n": 456, "medPpm": 2164.57}, {"tip": "двустаен", "median": 134000.0, "n": 436, "medPpm": 2040.42}, {"tip": "парцел", "median": 79900.0, "n": 315, "medPpm": 78.98}, {"tip": "къща", "median": 279000.0, "n": 181, "medPpm": 1601.88}, {"tip": "апартамент (без уточнение)", "median": 145000.0, "n": 112, "medPpm": 2063.97}, {"tip": "гараж", "median": 30000.0, "n": 100, "medPpm": 1376.52}, {"tip": "четиристаен", "median": 249000.0, "n": 81, "medPpm": 2157.61}, {"tip": "едностаен", "median": 74900.0, "n": 51, "medPpm": 2217.23}, {"tip": "търговски", "median": 135000.0, "n": 51, "medPpm": 1640.0}, {"tip": "многостаен", "median": 295000.0, "n": 37, "medPpm": 2065.26}, {"tip": "офис", "median": 135000.0, "n": 22, "medPpm": 2405.12}, {"tip": "земеделска", "median": 80000.0, "n": 9, "medPpm": 1285.71}, {"tip": "ателие/студио", "median": 91000.0, "n": 9, "medPpm": 2345.0}, {"tip": "мезонет", "median": 380000.0, "n": 7, "medPpm": 2606.74}], "district_stats_full": [{"district": "Бриз", "medPrice": 223000.0, "medPpm": 2368.54, "n": 79}, {"district": "Виница", "medPrice": 135900.0, "medPpm": 1787.13, "n": 69}, {"district": "Възраждане", "medPrice": 124450.0, "medPpm": 1855.72, "n": 64}, {"district": "Кайсиева градина", "medPrice": 109750.0, "medPpm": 1605.82, "n": 62}, {"district": "Център", "medPrice": 220000.0, "medPpm": 2634.88, "n": 61}, {"district": "Левски", "medPrice": 165000.0, "medPpm": 2042.66, "n": 48}, {"district": "Трошево", "medPrice": 154698.5, "medPpm": 2133.63, "n": 48}, {"district": "Владислав Варненчик", "medPrice": 105800.0, "medPpm": 1719.12, "n": 47}, {"district": "к.к. Св.Св. Константин и Елена", "medPrice": 235000.0, "medPpm": 2644.55, "n": 45}, {"district": "Аспарухово", "medPrice": 144500.0, "medPpm": 1716.3, "n": 44}, {"district": "Младост", "medPrice": 133000.0, "medPpm": 1988.51, "n": 39}, {"district": "Чайка", "medPrice": 240000.0, "medPpm": 2999.23, "n": 35}, {"district": "Лятно кино Тракия", "medPrice": 168000.0, "medPpm": 2374.88, "n": 29}, {"district": "Колхозен пазар", "medPrice": 155000.0, "medPpm": 2267.31, "n": 29}, {"district": "Цветен квартал", "medPrice": 166000.0, "medPpm": 2056.81, "n": 29}, {"district": "Гръцка махала", "medPrice": 317000.0, "medPpm": 3143.93, "n": 26}, {"district": "к.к. Златни пясъци", "medPrice": 117495.0, "medPpm": 1526.32, "n": 26}, {"district": "Погреби", "medPrice": 135000.0, "medPpm": 2102.11, "n": 21}, {"district": "м", "medPrice": 208500.0, "medPpm": 2373.47, "n": 16}, {"district": "Галата", "medPrice": 137495.0, "medPpm": 2043.01, "n": 16}, {"district": "Гранд Мол", "medPrice": 162550.0, "medPpm": 2512.56, "n": 14}, {"district": "Окръжна болница-Генерали", "medPrice": 265000.0, "medPpm": 2665.0, "n": 13}, {"district": "Автогара", "medPrice": 123000.0, "medPpm": 2085.65, "n": 13}, {"district": "к.к. Чайка", "medPrice": 240000.0, "medPpm": 2213.11, "n": 13}, {"district": "м-т Ален мак", "medPrice": 220000.0, "medPpm": 1833.34, "n": 13}, {"district": "Възраждане 1", "medPrice": 129000.0, "medPpm": 2037.74, "n": 12}, {"district": "Победа", "medPrice": 190000.0, "medPpm": 2642.61, "n": 12}, {"district": "ХЕИ", "medPrice": 140450.0, "medPpm": 1939.09, "n": 12}, {"district": "Конфуто", "medPrice": 179000.0, "medPpm": 2338.71, "n": 10}, {"district": "Чаталджа", "medPrice": 240000.0, "medPpm": 3025.21, "n": 10}, {"district": "Изгрев", "medPrice": 153000.0, "medPpm": 1779.49, "n": 9}, {"district": "Централна поща", "medPrice": 249950.0, "medPpm": 2654.44, "n": 8}, {"district": "Владислав Варненчик 1", "medPrice": 122200.0, "medPpm": null, "n": 8}, {"district": "ВИНС-Червен площад", "medPrice": 316500.0, "medPpm": 2738.41, "n": 8}, {"district": "м-т Горна Трака", "medPrice": 180986.0, "medPpm": 2101.95, "n": 8}, {"district": "м-т Пчелина", "medPrice": 118745.0, "medPpm": 1816.36, "n": 8}, {"district": "Кайсиева Градина", "medPrice": 136500.0, "medPpm": null, "n": 8}, {"district": "Младост 1", "medPrice": 135000.0, "medPpm": 2096.36, "n": 7}, {"district": "Спортна зала", "medPrice": 255000.0, "medPpm": 2906.82, "n": 7}, {"district": "Свети Никола", "medPrice": 380000.0, "medPpm": 2302.05, "n": 7}, {"district": "Фестивален комплекс", "medPrice": 269500.0, "medPpm": 3342.86, "n": 7}, {"district": "Цветен", "medPrice": 184000.0, "medPpm": null, "n": 7}, {"district": "Младост 2", "medPrice": 122500.0, "medPpm": 1666.67, "n": 6}, {"district": "Базар Левски", "medPrice": 193445.0, "medPpm": 2840.0, "n": 6}, {"district": "Христо Ботев", "medPrice": 162500.0, "medPpm": 2063.49, "n": 6}, {"district": "Зимно кино Тракия", "medPrice": 152495.0, "medPpm": 1993.08, "n": 6}, {"district": "Генералите", "medPrice": 205000.0, "medPpm": 2896.55, "n": 5}, {"district": "Гранд Мол Варна", "medPrice": 207000.0, "medPpm": 2178.95, "n": 5}, {"district": "Възраждане 3", "medPrice": 139900.0, "medPpm": 2293.44, "n": 5}, {"district": "Бизнес хотел", "medPrice": 157000.0, "medPpm": 2261.86, "n": 5}, {"district": "Операта", "medPrice": 240000.0, "medPpm": 2392.31, "n": 5}, {"district": "м-т Долна Трака", "medPrice": 228000.0, "medPpm": 1844.28, "n": 5}, {"district": "Колхозен Пазар", "medPrice": 163000.0, "medPpm": null, "n": 5}, {"district": "Завод Дружба", "medPrice": 215000.0, "medPpm": 2542.55, "n": 5}, {"district": "м-т Евксиноград", "medPrice": 250000.0, "medPpm": 3012.05, "n": 5}, {"district": "Левски 1", "medPrice": 127500.0, "medPpm": 2187.5, "n": 4}, {"district": "Общината", "medPrice": 344400.0, "medPpm": 3155.84, "n": 4}, {"district": "м-т Зеленика", "medPrice": 297500.0, "medPpm": 1923.11, "n": 4}, {"district": "Гръцки квартал", "medPrice": 294500.0, "medPpm": null, "n": 4}, {"district": "Виница, Варна", "medPrice": 170000.0, "medPpm": 1481.36, "n": 4}, {"district": "Владиславово", "medPrice": 115900.0, "medPpm": null, "n": 3}, {"district": "м. Пчелина", "medPrice": 107999.0, "medPpm": null, "n": 3}, {"district": "Бриз, Варна", "medPrice": 250000.0, "medPpm": 2666.67, "n": 3}, {"district": "Окръжна болница", "medPrice": 227450.0, "medPpm": 2967.16, "n": 2}, {"district": "Възраждане 2", "medPrice": 169950.0, "medPpm": 2533.33, "n": 2}, {"district": "Владислав Варненчик 2", "medPrice": 112950.0, "medPpm": null, "n": 2}, {"district": "Стадион Спартак", "medPrice": 277000.0, "medPpm": null, "n": 2}, {"district": "м-т Боклук Тарла", "medPrice": 122703.0, "medPpm": 1465.24, "n": 2}, {"district": "Тракия - лятно кино", "medPrice": 222250.0, "medPpm": null, "n": 2}, {"district": "Автогарата", "medPrice": 166500.0, "medPpm": null, "n": 2}, {"district": "Винс", "medPrice": 182500.0, "medPpm": null, "n": 2}, {"district": "Погребите, Варна", "medPrice": 192500.0, "medPpm": 1382.05, "n": 2}, {"district": "Център, Варна", "medPrice": 284250.0, "medPpm": 2675.77, "n": 2}]}</script>
+<script type="application/json" id="seller-data">{"private": {"label": "частно лице", "n": 62, "nActive": 62, "medPrice": 189900.0, "medPpm": 2142.86, "nApt": 39}, "agency": {"label": "агенция", "n": 902, "nActive": 902, "medPrice": 165000.0, "medPpm": 2092.07, "nApt": 726}, "unknown": 903}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const RAW = JSON.parse(document.getElementById('raw-data').textContent);
+const META = JSON.parse(document.getElementById('meta-data').textContent);
+const fmtInt = n => n==null ? '—' : Math.round(n).toLocaleString('bg-BG');
+const fmtEur = n => n==null ? '—' : '€' + Math.round(n).toLocaleString('bg-BG');
+const median = arr => { const a = arr.filter(v => v != null).slice().sort((x,y)=>x-y); return a.length ? (a.length % 2 ? a[(a.length-1)/2] : (a[a.length/2-1]+a[a.length/2])/2) : null; };
+
+document.getElementById('run-range').textContent = `${META.earliest} – ${META.latest}`;
+document.getElementById('run-count').textContent = META.runCount;
+
+// ── business-property detection ─────────────────────────────
+const BIZ_RE = /склад|магазин|търговск|хотел|ресторант|кафене|заведение|шоурум|промишлен|индустриал|автосервиз|бензиностанция|логистичен|производствен|бизнес\s*сграда|бизнес\s*център/i;
+function isBusiness(r){
+  if (r.tip === 'офис' || r.tip === 'търговски') return true;
+  if (r.tip === 'друго' && BIZ_RE.test(r.desc || '')) return true;
+  return false;
+}
+
+const POOLS = {
+  sale: { label: 'Продажби', base: r => !r.rent },
+  rent: { label: 'Наеми',    base: r => r.rent },
+};
+function matchesFocus(r){
+  if (state.focus === 'апартамент') return r.tip === 'апартамент';
+  if (state.focus === 'business') return isBusiness(r);
+  return true;
+}
+// продажби: реалистично €/кв.м за ЦЕНА на имота. наеми: реалистично €/кв.м НА МЕСЕЦ —
+// съвсем различен мащаб (наем/кв.м обикновено 3-20€, а не 150-8000€) — обявите извън диапазона
+// почти сигурно са грешно определени (продажба маркирана като наем, или обратно).
+function ppmRange(){
+  return state.pool === 'rent' ? [2, 30] : [150, 8000];
+}
+
+let state = { pool: 'sale', focus: 'апартамент', status: 'all', invest: 'all', src: 'all', tip: 'all', phone: 'all', seller: 'all', q: '', sort: null, dir: 1, page: 1 };
+let matrixByRoom = {};
+function renderMatrixBars(room){
+  const list = (matrixByRoom[room] || []).slice().sort((a,b) => (b.medPpm||0) - (a.medPpm||0));
+  document.getElementById('matrix-stats').innerHTML = list.length ? list.map(s => `
+    <div class="bar-row">
+      <div class="name" title="${s.district}">${s.district}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${((s.medPpm||0)/(list[0].medPpm||1)*100).toFixed(1)}%"></div></div>
+      <div class="bar-val">${s.medPpm ? `<b>€${fmtInt(s.medPpm)}/м²</b>` : '—'} · ${fmtEur(s.medPrice)} · ${s.n}бр</div>
+    </div>`).join('') : '<div class="meta" style="color:var(--muted)">Няма квартали с поне 3 обяви за този тип.</div>';
+}
+document.getElementById('f-matrix-room').addEventListener('change', e => renderMatrixBars(e.target.value));
+
+let chartEligibleAll = [];
+let chartTypeLabel = 'апартаменти';
+let chartPoolLabel = 'продажби';
+function drawTrendChart(districtFilter){
+  const eligible = (!districtFilter || districtFilter === 'all')
+    ? chartEligibleAll
+    : chartEligibleAll.filter(r => (r.loc || 'Варна') === districtFilter);
+  const byMonth = {};
+  eligible.forEach(r => { const m = (r.firstSeen||'').slice(0,7); if (!m) return; (byMonth[m] = byMonth[m] || []).push(r.ppm); });
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const excludedCount = byMonth[currentMonth] ? byMonth[currentMonth].length : 0;
+  const months = Object.keys(byMonth).filter(m => m !== currentMonth).sort();
+  const TREND = months.map(m => ({ month: m, median: median(byMonth[m]), n: byMonth[m].length }));
+
+  if (TREND.length < 2) {
+    document.getElementById('chart').innerHTML = '<div class="meta" style="color:var(--muted);padding:20px 0;">Няма достатъчно месеци с данни за графика в този избор.</div>';
+    document.getElementById('chart-cap').textContent = '';
+    return;
+  }
+
+  const W = 380, H = 150, padL = 34, padR = 10, padT = 14, padB = 20;
+  const vals = TREND.map(t => t.median);
+  const min = Math.min(...vals) * 0.96, max = Math.max(...vals) * 1.04;
+  const x = i => padL + (W - padL - padR) * (i / (TREND.length - 1));
+  const y = v => H - padB - (H - padT - padB) * (v - min) / (max - min || 1);
+
+  const monthNames = {'01':'Яну','02':'Фев','03':'Мар','04':'Апр','05':'Май','06':'Юни','07':'Юли','08':'Авг','09':'Сеп','10':'Окт','11':'Ное','12':'Дек'};
+  let gridLines = '';
+  const steps = 3;
+  for (let i=0;i<=steps;i++){
+    const v = min + (max-min)*i/steps;
+    const yy = y(v);
+    gridLines += `<line class="chart-grid" x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}"/>`;
+    gridLines += `<text class="chart-axis" x="${padL-6}" y="${yy+3}" text-anchor="end">${Math.round(v)}</text>`;
+  }
+  let path = TREND.map((t,i) => `${i===0?'M':'L'} ${x(i)} ${y(t.median)}`).join(' ');
+  let area = path + ` L ${x(TREND.length-1)} ${H-padB} L ${x(0)} ${H-padB} Z`;
+  let dots = TREND.map((t,i) => {
+    const cls = i === TREND.length-1 ? 'chart-dot end' : 'chart-dot';
+    return `<circle class="${cls}" cx="${x(i)}" cy="${y(t.median)}" r="3.2"/>`;
+  }).join('');
+  let labels = TREND.map((t,i) => `<text class="chart-axis" x="${x(i)}" y="${H-4}" text-anchor="middle">${monthNames[t.month.slice(5)]||t.month} (${t.n})</text>`).join('');
+  let valLabel = `<text class="chart-label" x="${x(TREND.length-1)}" y="${y(TREND[TREND.length-1].median)-10}" text-anchor="end">€${Math.round(TREND[TREND.length-1].median)}</text>`;
+
+  document.getElementById('chart').innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}">${gridLines}<path class="chart-area" d="${area}"/><path class="chart-line" d="${path}"/>${dots}${labels}${valLabel}</svg>`;
+  const districtLabel = (!districtFilter || districtFilter === 'all') ? '' : `, само ${districtFilter}`;
+  const thinMonths = TREND.filter(t => t.n < 30).length;
+  document.getElementById('chart-cap').textContent =
+    `Медианна цена/кв.м по месец на обхода — ${chartPoolLabel}, само частни лица, ${chartTypeLabel}${districtLabel} (n=${TREND.reduce((a,t)=>a+t.n,0)} обявени точки, брой по месец в скоби до датите).` +
+    (excludedCount ? ` Текущият месец (${excludedCount} обяви) не е показан — все още тече и не е сравним с пълните месеци.` : '') +
+    (thinMonths ? ` Внимание: ${thinMonths} от показаните месеци имат под 30 обяви — медианата там е по-шумна, не я цитирай пред клиент като сигурна тенденция.` : '');
+}
+document.getElementById('f-chart-district').addEventListener('change', e => drawTrendChart(e.target.value));
+const PAGE_SIZE = 30;
+let rows = [];
+
+// ── pool tabs ────────────────────────────────────────────────
+document.querySelectorAll('#pool-tabs button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.pool === state.pool) return;
+  document.querySelectorAll('#pool-tabs button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  state.pool = b.dataset.pool;
+  state.focus = 'апартамент'; state.status = 'all'; state.invest = 'all'; state.src = 'all'; state.tip = 'all';
+  state.phone = 'all'; state.seller = 'all'; state.q = ''; state.sort = null; state.dir = 1;
+  document.querySelectorAll('#f-focus button').forEach((x,i) => x.classList.toggle('active', i===0));
+  document.querySelectorAll('#f-status button').forEach((x,i) => x.classList.toggle('active', i===0));
+  document.querySelectorAll('#f-invest button').forEach((x,i) => x.classList.toggle('active', i===0));
+  document.querySelectorAll('#f-seller button').forEach((x,i) => x.classList.toggle('active', i===0));
+  document.getElementById('f-src').value = 'all';
+  document.getElementById('f-phone').value = 'all';
+  document.getElementById('f-search').value = '';
+  renderPool();
+  document.querySelector('.wrap').scrollIntoView({behavior:'smooth', block:'start'});
+}));
+
+function renderPool(){
+  const pool = POOLS[state.pool];
+  rows = RAW.filter(pool.base);
+
+  // ── "изгодна оферта" / топ 3 (спрямо медиана €/кв.м за (тип+стаи)+район, само активни) ──
+  (function computeDeals(){
+    const [lo, hi] = ppmRange();
+    const activeRows = rows.filter(r => r.active && typeof r.ppm === 'number' && r.ppm >= lo && r.ppm <= hi && r.loc);
+    const groups = new Map();
+    activeRows.forEach(r => {
+      const key = (r.tip === 'апартамент' ? (r.tip_fine || r.tip) : r.tip) + '|' + r.loc;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r.ppm);
+    });
+    const groupMedian = new Map();
+    groups.forEach((vals, key) => { if (vals.length >= 3) groupMedian.set(key, median(vals)); });
+    rows.forEach(r => { r._deal = false; r._dealPct = null; r._top3 = false; });
+    const ranked = [];
+    activeRows.forEach(r => {
+      const key = (r.tip === 'апартамент' ? (r.tip_fine || r.tip) : r.tip) + '|' + r.loc;
+      const gm = groupMedian.get(key);
+      if (gm) {
+        const pct = (gm - r.ppm) / gm;
+        r._dealPct = Math.round(pct*100);
+        if (pct >= 0.15) { r._deal = true; ranked.push(r); }
+      }
+    });
+    ranked.sort((a,b) => b._dealPct - a._dealPct);
+    ranked.slice(0,3).forEach(r => { r._top3 = true; });
+  })();
+
+  // ── stat cards ────────────────────────────────────────────
+  const sales = rows;
+  const scopedSales = state.focus === 'all' ? sales : sales.filter(matchesFocus);
+  const active = rows.filter(r => r.active);
+  const withPhone = rows.filter(r => r.phone);
+  const drops = rows.filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3);
+  const activeAgency = active.filter(r => r.seller === 'агенция').length;
+  const activePrivate = active.filter(r => r.seller === 'частно лице').length;
+
+  const statDefs = [
+    {n: rows.length, l: 'Уникални обяви', cls: ''},
+    {n: sales.length, l: pool.label, cls: 'accent'},
+    {n: active.length, l: 'Активни сега', cls: 'good'},
+    {n: rows.length - active.length, l: 'Не са в последния обход', cls: ''},
+    {n: withPhone.length, l: 'С телефон', cls: 'good'},
+    {n: drops.length, l: 'С намалена цена', cls: 'warn'},
+    {n: activeAgency, l: 'Активни от агенции', cls: 'accent'},
+    {n: activePrivate, l: 'Активни от частни лица', cls: 'good'},
+  ];
+  document.getElementById('stats').innerHTML = statDefs.map(s =>
+    `<div class="stat ${s.cls}"><div class="num">${s.n}</div><div class="lbl">${s.l}</div></div>`
+  ).join('');
+
+  // ── findings ──────────────────────────────────────────────
+  const imotRows = rows.filter(r => r.src === 'IMOT.BG');
+  const olxRows = rows.filter(r => r.src === 'OLX');
+  const focusEligible = scopedSales;
+  const [ppmLo, ppmHi] = ppmRange();
+  const focusPpm = focusEligible.filter(r => r.ppm && r.ppm >= ppmLo && r.ppm <= ppmHi).map(r => r.ppm).sort((a,b)=>a-b);
+  const medPpm = median(focusPpm);
+  const delistedSeenMulti = rows.filter(r => !r.active && r.timesSeen > 1);
+  const avgDaysGone = delistedSeenMulti.length ? Math.round(delistedSeenMulti.reduce((a,r)=>a+r.daysSpan,0)/delistedSeenMulti.length) : null;
+  const topDrop = drops.slice().sort((a,b)=>a.drop.pct-b.drop.pct)[0];
+  const focusLabel = state.focus === 'апартамент' ? 'апартамент (частни лица)' : state.focus === 'business' ? 'бизнес имот (частни лица)' : 'имот (частни лица)';
+  const relistedRows = rows.filter(r => r.relisted);
+
+  const findings = [
+    {
+      cls: 'good',
+      html: `<b>${rows.length} уникални обяви от ${META.runCount} обхода</b> <span class="note">— обединени по линк на обявата от ${META.earliest} до ${META.latest}; дублиращите се сканирания на една и съща обява са слети в един ред.</span>`
+    },
+    {
+      cls: 'warn',
+      html: `<b>Само ${active.length} от тях са в най-новия обход</b> <span class="note">— останалите ${rows.length-active.length} вече не излизат при сканиране (продадени, свалени или извън обхванатите страници).</span>`
+    },
+    {
+      cls: 'good',
+      html: `<b>Средно обявите остават видими ~${avgDaysGone ?? '—'} дни</b> <span class="note">— измерено по ${delistedSeenMulti.length} обяви, засечени поне два пъти преди да изчезнат от обхода.</span>`
+    },
+    {
+      cls: 'warn',
+      html: topDrop
+        ? `<b>Най-голямо намаление: ${Math.abs(topDrop.drop.pct)}%</b> <span class="note">— ${topDrop.tip}, ${topDrop.loc}: €${fmtInt(topDrop.drop.from)} → €${fmtInt(topDrop.drop.to)}.</span>`
+        : `<b>Няма засечени съществени намаления на цена</b> <span class="note">— във filtered резултатите.</span>`
+    },
+    {
+      cls: 'good',
+      html: focusPpm.length
+        ? `<b>Медиана за ${focusLabel}: €${fmtInt(medPpm)}/кв.м</b> <span class="note">— по ${focusPpm.length} уникални обяви в целия период (диапазон €${fmtInt(focusPpm[0])}–€${fmtInt(focusPpm[focusPpm.length-1])}/кв.м).</span>`
+        : `<b>Няма достатъчно данни за медиана €/кв.м</b> <span class="note">— в този пул.</span>`
+    },
+    {
+      cls: 'bad',
+      html: `<b>Телефон има само при ${withPhone.length} от ${rows.length} обяви</b> <span class="note">— IMOT.bg го дава директно (${imotRows.filter(r=>r.phone).length} от ${imotRows.length}), OLX.bg (${olxRows.length} обяви) го крие зад бутон и скрейперът засега не го изважда.</span>`
+    },
+    {
+      cls: 'accent',
+      html: activeAgency + activePrivate > 0
+        ? `<b>${Math.round(activeAgency/(activeAgency+activePrivate)*100)}% от активните обяви са на агенции</b> <span class="note">— ${activeAgency} от агенции срещу ${activePrivate} от частни лица, в най-новия обход.</span>`
+        : `<b>Няма данни за тип продавач в най-новия обход</b> <span class="note"></span>`
+    },
+  ];
+  if (relistedRows.length) {
+    findings.push({
+      cls: 'warn',
+      html: `<b>${relistedRows.length} обяви са свалени и после пак качени</b> <span class="note">— разпознати по съвпадение на телефон+цена+площ под нов линк; дните на пазара при тях включват и предишния период.</span>`
+    });
+  }
+  document.getElementById('findings').innerHTML = findings.map(f =>
+    `<div class="finding"><span class="dot ${f.cls}"></span><p>${f.html}</p></div>`
+  ).join('');
+
+  // ── monthly trend chart (SVG) ────────────────────────────
+  (function prepChart(){
+    chartTypeLabel = state.focus === 'апартамент' ? 'апартаменти' : state.focus === 'business' ? 'бизнес имоти' : 'имоти';
+    chartPoolLabel = pool.label.toLowerCase();
+    const chartTitle = document.getElementById('chart-title');
+    const chartUnitSuffix = state.pool === 'rent' ? ' на месец (наем)' : '';
+    if (chartTitle) chartTitle.textContent = `Медианна €/кв.м${chartUnitSuffix} за ${chartTypeLabel} по месеци`;
+    const [chPpmLo, chPpmHi] = ppmRange();
+    const base = scopedSales.filter(r => r.ppm && r.ppm >= chPpmLo && r.ppm <= chPpmHi && r.seller !== 'агенция');
+    chartEligibleAll = base;
+
+    const districtCounts = {};
+    base.forEach(r => { const d = r.loc || 'Варна'; districtCounts[d] = (districtCounts[d]||0) + 1; });
+    const districts = Object.entries(districtCounts)
+      .filter(([,n]) => n >= 6)
+      .sort((a,b) => b[1]-a[1])
+      .map(([d]) => d);
+    const sel = document.getElementById('f-chart-district');
+    const prevVal = sel.value;
+    sel.innerHTML = '<option value="all">Всички (Варна)</option>' +
+      districts.map(d => `<option value="${d}">${d}</option>`).join('');
+    sel.value = districts.includes(prevVal) ? prevVal : 'all';
+    drawTrendChart(sel.value);
+  })();
+
+  // ── price by type ────────────────────────────────────────
+  (function renderTypeStats(){
+    const titleEl = document.getElementById('type-title');
+    if (titleEl) titleEl.textContent = state.focus === 'апартамент' ? 'Медианна цена по тип имот' : state.focus === 'business' ? 'Медианна цена по тип бизнес имот' : 'Медианна цена по тип имот (всички)';
+    const groups = {};
+    scopedSales.forEach(r => { (groups[r.tip_fine] = groups[r.tip_fine] || []).push(r); });
+    const stats = Object.entries(groups).map(([tip, items]) => ({
+      tip, median: median(items.map(i=>i.price)), n: items.length, medPpm: median(items.map(i=>i.ppm))
+    })).filter(s => s.median != null).sort((a,b) => a.median - b.median);
+    const maxMed = Math.max(...stats.map(s => s.median), 1);
+    const cap = s => s[0].toUpperCase()+s.slice(1);
+    document.getElementById('type-stats').innerHTML = stats.length ? stats.map(s => `
+      <div class="bar-row">
+        <div class="name" title="${cap(s.tip)}">${cap(s.tip)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(s.median/maxMed*100).toFixed(1)}%"></div></div>
+        <div class="bar-val"><b>${fmtEur(s.median)}</b>${s.medPpm ? ` · €${fmtInt(s.medPpm)}/м²` : ''} · ${s.n}бр</div>
+      </div>`).join('') : '<div class="meta" style="color:var(--muted)">Няма данни.</div>';
+  })();
+
+  // ── by district: price + €/m² ───────────────────────────
+  (function renderDistrictStats(){
+    const titleEl = document.getElementById('district-title');
+    if (titleEl) titleEl.textContent = state.focus === 'апартамент' ? 'Апартаменти по квартал' : state.focus === 'business' ? 'Бизнес имоти по квартал' : 'Имоти по квартал';
+    const base = scopedSales;
+    const groups = {};
+    base.forEach(r => { const d = r.loc || 'Варна'; (groups[d] = groups[d] || []).push(r); });
+    const stats = Object.entries(groups)
+      .filter(([,items]) => items.length >= 2)
+      .map(([district, items]) => ({
+        district, medPrice: median(items.map(i=>i.price)), medPpm: median(items.map(i=>i.ppm)), n: items.length
+      }))
+      .sort((a,b) => (a.medPrice||0) - (b.medPrice||0));
+    const maxMed = Math.max(...stats.map(s => s.medPrice || 0), 1);
+    document.getElementById('district-stats').innerHTML = stats.length ? stats.map(s => `
+      <div class="bar-row">
+        <div class="name" title="${s.district}">${s.district}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${((s.medPrice||0)/maxMed*100).toFixed(1)}%"></div></div>
+        <div class="bar-val">${s.medPrice ? `<b>${fmtEur(s.medPrice)}</b>` : '—'}${s.medPpm ? ` · €${fmtInt(s.medPpm)}/м²` : ''} · ${s.n}бр</div>
+      </div>`).join('') : '<div class="meta" style="color:var(--muted)">Няма достатъчно данни по квартали.</div>';
+  })();
+
+  // ── по квартал × брой стаи (медиана) ──────────────────────
+  (function renderMatrix(){
+    const matrixPanel = document.getElementById('panel-matrix');
+    if (state.focus !== 'апартамент') { matrixPanel.style.display = 'none'; return; }
+    matrixPanel.style.display = '';
+    const [PPM_MIN, PPM_MAX] = ppmRange();
+    const base = scopedSales.filter(r => r.ppm && r.ppm >= PPM_MIN && r.ppm <= PPM_MAX);
+    const ROOM_ORDER = ['едностаен','ателие/студио','двустаен','тристаен','четиристаен','многостаен','мезонет','апартамент (без уточнение)'];
+    const groups = {};
+    base.forEach(r => {
+      const room = r.tip_fine || 'апартамент (без уточнение)';
+      const d = r.loc || 'Варна';
+      const key = room + '||' + d;
+      (groups[key] = groups[key] || {room, district: d, items: []}).items.push(r);
+    });
+    matrixByRoom = {};
+    Object.values(groups).forEach(g => {
+      if (g.items.length < 3) return;
+      const entry = {
+        district: g.district, n: g.items.length,
+        medPrice: median(g.items.map(i=>i.price)),
+        medPpm: median(g.items.map(i=>i.ppm)),
+      };
+      (matrixByRoom[g.room] = matrixByRoom[g.room] || []).push(entry);
+    });
+    const rooms = Object.keys(matrixByRoom).sort((a,b) => {
+      const ai = ROOM_ORDER.indexOf(a), bi = ROOM_ORDER.indexOf(b);
+      return (ai<0?99:ai) - (bi<0?99:bi);
+    });
+    const sel = document.getElementById('f-matrix-room');
+    const prevVal = sel.value;
+    sel.innerHTML = rooms.map(r => `<option value="${r}">${r[0].toUpperCase()+r.slice(1)} (${matrixByRoom[r].length} квартала)</option>`).join('');
+    const defaultRoom = rooms.includes(prevVal) ? prevVal : (rooms.includes('двустаен') ? 'двустаен' : rooms[0]);
+    if (defaultRoom) sel.value = defaultRoom;
+    renderMatrixBars(defaultRoom || '');
+  })();
+
+  // ── top price drops ───────────────────────────────────────
+  (function renderDrops(){
+    const list = rows
+      .filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3)
+      .slice()
+      .sort((a,b) => a.drop.pct - b.drop.pct)
+      .slice(0, 8);
+    document.getElementById('drop-list').innerHTML = list.length ? list.map(r => `
+      <div class="drop-row">
+        <div style="min-width:0">
+          <a href="${r.link}" target="_blank" rel="noopener">${r.tip} · ${r.loc||'Варна'}</a>
+          <div class="meta">€${fmtInt(r.drop.from)} → €${fmtInt(r.drop.to)}</div>
+        </div>
+        <div class="pct">${r.drop.pct}%</div>
+      </div>`).join('') : '<div class="meta" style="color:var(--muted)">Няма засечени намаления над 3% в историята.</div>';
+  })();
+
+  // ── seller comparison panel (частни vs. агенции) ──────────
+  (function renderSellerCompare(){
+    const titleHint = document.getElementById('seller-compare-hint');
+    if (titleHint) titleHint.textContent = state.focus === 'апартамент' ? '— апартаменти, медианна цена/кв.м' : state.focus === 'business' ? '— бизнес имоти, медианна цена/кв.м' : '— всички имоти, медианна цена/кв.м';
+    const base = scopedSales;
+    const withUnknown = base.filter(r => !r.seller).length;
+    const statsFor = seller => {
+      const items = base.filter(r => r.seller === seller);
+      const withPpmItems = items.filter(r => r.ppm && r.ppm > 50);
+      return {
+        n: items.length,
+        nActive: items.filter(r=>r.active).length,
+        medPrice: median(items.map(r=>r.price)),
+        medPpm: median(withPpmItems.map(r=>r.ppm)),
+        nPpm: withPpmItems.length,
+      };
+    };
+    const p = statsFor('частно лице'), a = statsFor('агенция');
+    const box = (cls, label, s) => `
+      <div class="seller-box ${cls}">
+        <div class="who">${label}</div>
+        <div class="big">${s.medPpm ? '€' + fmtInt(s.medPpm) + '/м²' : '—'}</div>
+        <div class="sub">${fmtEur(s.medPrice)} медианна цена · ${s.nActive} активни обяви${s.nPpm ? ` (${s.nPpm} с €/кв.м)` : ''}</div>
+      </div>`;
+    document.getElementById('seller-compare').innerHTML = box('private', 'Частни лица', p) + box('agency', 'Агенции', a);
+    if (p.medPpm && a.medPpm) {
+      const diffPct = Math.round((p.medPpm - a.medPpm) / a.medPpm * 100);
+      const who = diffPct > 0 ? 'по-скъпо' : 'по-евтино';
+      document.getElementById('seller-note').textContent =
+        `Частните продавачи искат средно ${Math.abs(diffPct)}% ${who} на кв.м спрямо агенциите` +
+        (withUnknown ? ` · ${withUnknown} по-стари обяви без данни за тип продавач не участват в сравнението` : '') + '.';
+    } else {
+      document.getElementById('seller-note').textContent = 'Недостатъчно данни за сравнение в този пул.';
+    }
+  })();
+
+  // ── тип select (rebuild per pool) ───────────────────────
+  const tipSet = [...new Set(rows.map(r => r.tip))].sort();
+  document.getElementById('f-tip').innerHTML = '<option value="all">Всички типове</option>' +
+    tipSet.map(t => `<option value="${t}">${t[0].toUpperCase()+t.slice(1)}</option>`).join('');
+
+  applyFilters();
+}
+
+function applyFilters(){
+  let out = rows.filter(r => {
+    if (state.status === 'active' && !r.active) return false;
+    if (state.status === 'drop' && !(r.drop && r.drop.from > 1000 && r.drop.pct <= -3)) return false;
+    if (state.focus !== 'all' && !matchesFocus(r)) return false;
+    if (state.invest === 'yes' && !r.fromInvestor) return false;
+    if (state.src !== 'all' && r.src !== state.src) return false;
+    if (state.tip !== 'all' && r.tip !== state.tip) return false;
+    if (state.phone === 'yes' && !r.phone) return false;
+    if (state.seller !== 'all' && r.seller !== state.seller) return false;
+    if (state.q) {
+      const hay = (r.loc + ' ' + r.desc).toLowerCase();
+      if (!hay.includes(state.q.toLowerCase())) return false;
+    }
+    return true;
+  });
+  if (state.sort) {
+    out = out.slice().sort((a,b) => {
+      let av = a[state.sort], bv = b[state.sort];
+      if (av == null) av = state.dir === 1 ? Infinity : -Infinity;
+      if (bv == null) bv = state.dir === 1 ? Infinity : -Infinity;
+      if (typeof av === 'string') return av.localeCompare(bv, 'bg') * state.dir;
+      return (av - bv) * state.dir;
+    });
+  }
+  applyFilters.currentList = out;
+  state.page = 1;
+  render(out);
+}
+
+function render(list){
+  document.getElementById('result-count').textContent = `${list.length} от ${rows.length} обяви`;
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  if (state.page > totalPages) state.page = totalPages;
+  if (state.page < 1) state.page = 1;
+  const startIdx = (state.page - 1) * PAGE_SIZE;
+  const shown = list.slice(startIdx, startIdx + PAGE_SIZE);
+  document.getElementById('tbody').innerHTML = shown.map(r => {
+    const tags = [];
+    if (r.rent) tags.push('<span class="tag rent">НАЕМ</span>');
+    if (r.urgent) tags.push('<span class="tag urgent">СПЕШНО</span>');
+    if (r.isNew) tags.push('<span class="tag new">НОВА</span>');
+    if (r.relisted) tags.push('<span class="tag relisted">ПРЕИЗДАДЕНА</span>');
+    if (r.fromInvestor) tags.push('<span class="tag investor">ОТ ИНВЕСТИТОР</span>');
+    if (r.newBuild) tags.push('<span class="tag newbuild">НОВО СТРОИТЕЛСТВО</span>');
+    if (r._top3) tags.push('<span class="tag top3">ТОП 3 ИЗГОДНИ</span>');
+    else if (r._deal) tags.push(`<span class="tag deal">ИЗГОДНА -${r._dealPct}%</span>`);
+    const descText = (r.desc||'').replace(/\s*\.\.\.\s*$/,'…');
+    const statusTag = r.active
+      ? '<span class="tag active">АКТИВНА</span>'
+      : '<span class="tag gone">НЕ Е В ПОСЛЕДНИЯ</span>';
+    const dropTag = r.drop ? `<span class="tag drop">${r.drop.pct}%</span>` : '';
+    const photoCell = r.photo
+      ? `<a href="${r.link}" target="_blank" rel="noopener"><img class="thumb" src="${r.photo}" loading="lazy" alt="" referrerpolicy="no-referrer" onerror='this.onerror=null;this.outerHTML="<div class=\"thumb-empty\">—</div>"'></a>`
+      : '<div class="thumb-empty">—</div>';
+    return `<tr class="${r.active ? '' : 'inactive'}">
+      <td>${photoCell}</td>
+      <td>${r.tip}</td>
+      <td class="loc">${r.loc||'—'}</td>
+      <td class="num">${r.sqm ? fmtInt(r.sqm)+' м²' : '—'}</td>
+      <td class="num">${fmtEur(r.price)} ${dropTag}</td>
+      <td class="num">${r.ppm ? fmtInt(r.ppm) : '—'}</td>
+      <td>${statusTag}</td>
+      <td class="num">${r.timesSeen}×</td>
+      <td class="hist">${r.firstSeen} → ${r.lastSeen}<br>(${r.daysSpan} дни)</td>
+      <td>${r.phone ? `<span class="phone">${r.phone}</span>` : '<span class="phone empty">—</span>'}</td>
+      <td><span class="src-pill ${r.src==='IMOT.BG'?'imot':(r.src==='ALO.BG'?'alo':'olx')}">${r.src}</span></td>
+      <td>${r.seller ? `<span class="src-pill ${r.seller==='агенция'?'seller-agency':'seller-private'}">${r.seller==='агенция'?'Агенция':'Частно'}</span>` : '<span class="phone empty">—</span>'}</td>
+      <td class="desc">
+        ${tags.length ? `<div style="margin-bottom:3px">${tags.join('')}</div>` : ''}
+        <a href="${r.link}" target="_blank" rel="noopener" class="clip">${descText || r.loc || 'Обява →'}</a>
+      </td>
+    </tr>`;
+  }).join('') + (shown.length === 0 ? `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:14px;">Няма обяви по тези филтри.</td></tr>` : '');
+  renderPager(totalPages);
+}
+
+function renderPager(totalPages){
+  const el = document.getElementById('pager');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  const cur = state.page;
+  const goTo = p => `data-page="${p}"`;
+  let nums = [];
+  const pushNum = p => nums.push(`<button ${goTo(p)} class="${p===cur?'active':''}">${p}</button>`);
+  const pushGap = () => nums.push('<span class="pager-gap">…</span>');
+  pushNum(1);
+  let lo = Math.max(2, cur-2), hi = Math.min(totalPages-1, cur+2);
+  if (lo > 2) pushGap();
+  for (let p=lo; p<=hi; p++) pushNum(p);
+  if (hi < totalPages-1) pushGap();
+  if (totalPages > 1) pushNum(totalPages);
+  el.innerHTML = `
+    <button data-page="${cur-1}" ${cur<=1?'disabled':''}>‹</button>
+    ${nums.join('')}
+    <button data-page="${cur+1}" ${cur>=totalPages?'disabled':''}>›</button>
+  `;
+  el.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => {
+    state.page = parseInt(b.dataset.page, 10);
+    render(applyFilters.currentList);
+    document.querySelector('.table-scroll').scrollIntoView({behavior:'smooth', block:'start'});
+  }));
+}
+
+document.querySelectorAll('#f-status button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#f-status button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); state.status = b.dataset.v; applyFilters();
+}));
+document.querySelectorAll('#f-focus button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.v === state.focus) return;
+  document.querySelectorAll('#f-focus button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); state.focus = b.dataset.v; renderPool();
+}));
+document.querySelectorAll('#f-invest button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#f-invest button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); state.invest = b.dataset.v; applyFilters();
+}));
+document.querySelectorAll('#f-seller button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#f-seller button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); state.seller = b.dataset.v; applyFilters();
+}));
+document.getElementById('f-src').addEventListener('change', e => { state.src = e.target.value; applyFilters(); });
+document.getElementById('f-tip').addEventListener('change', e => { state.tip = e.target.value; applyFilters(); });
+document.getElementById('f-phone').addEventListener('change', e => { state.phone = e.target.value; applyFilters(); });
+document.getElementById('f-search').addEventListener('input', e => { state.q = e.target.value; applyFilters(); });
+document.querySelectorAll('thead th[data-sort]').forEach(th => th.addEventListener('click', () => {
+  const key = th.dataset.sort;
+  if (state.sort === key) state.dir *= -1; else { state.sort = key; state.dir = 1; }
+  applyFilters();
+}));
+
+renderPool();
+
+// ── PDF export (свали текущата страница на таблицата) ─────
+let downloadsCap = null;
+const pdfBtn = document.getElementById('pdf-btn');
+if (window.claude && typeof window.claude.use === 'function') {
+  window.claude.use('downloads').then(cap => {
+    downloadsCap = cap;
+    if (cap) pdfBtn.hidden = false;
+  }).catch(() => {});
+}
+
+function buildPdfExportEl(){
+  const list = applyFilters.currentList || rows;
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const startIdx = (state.page - 1) * PAGE_SIZE;
+  const shown = list.slice(startIdx, startIdx + PAGE_SIZE);
+
+  const cols = [
+    ['Тип', r => r.tip || '—'],
+    ['Локация', r => r.loc || '—'],
+    ['Площ', r => r.sqm ? fmtInt(r.sqm)+' м²' : '—'],
+    ['Цена', r => fmtEur(r.price) + (r.drop ? ` (${r.drop.pct}%)` : '')],
+    ['€/кв.м', r => r.ppm ? fmtInt(r.ppm) : '—'],
+    ['Статус', r => r.active ? 'Активна' : 'Не е в последния'],
+    ['Обходи', r => r.timesSeen + '×'],
+    ['На пазара', r => `${r.firstSeen} → ${r.lastSeen} (${r.daysSpan}д)`],
+    ['Телефон', r => r.phone || '—'],
+    ['Извор', r => r.src],
+    ['Продавач', r => r.seller || '—'],
+    ['Обява', r => (r.desc || r.loc || '').replace(/\s*\.\.\.\s*$/,'…').slice(0,70)],
+  ];
+
+  const filterBits = [POOLS[state.pool].label];
+  if (state.focus !== 'all') filterBits.push(state.focus === 'апартамент' ? 'апартаменти' : 'бизнес имоти');
+  if (state.status !== 'all') filterBits.push(state.status === 'active' ? 'само активни' : 'само с намалена цена');
+  if (state.invest === 'yes') filterBits.push('от инвеститор');
+  if (state.src !== 'all') filterBits.push(state.src);
+  if (state.tip !== 'all') filterBits.push(state.tip);
+  if (state.seller !== 'all') filterBits.push(state.seller);
+  if (state.phone === 'yes') filterBits.push('само с телефон');
+  if (state.q) filterBits.push(`търсене: "${state.q}"`);
+
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed; left:-99999px; top:0; width:1500px; background:#ffffff; color:#111417; padding:26px; font-family:Arial,Helvetica,sans-serif;';
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1f2328;padding-bottom:10px;margin-bottom:14px;">
+      <div>
+        <div style="font-size:19px;font-weight:700;">Имотен радар · Варна</div>
+        <div style="font-size:11px;color:#57606a;margin-top:3px;">Нов Век · Нови Възможности — обединен обход на OLX.bg, IMOT.bg и ALO.bg, дедуплициран по линк на обявата</div>
+        ${filterBits.length ? `<div style="font-size:11px;color:#57606a;margin-top:3px;">Филтри: ${filterBits.join(' · ')}</div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:11px;color:#57606a;white-space:nowrap;">
+        <div>Генерирано: ${new Date().toLocaleDateString('bg-BG')}</div>
+        <div>Страница ${state.page} от ${totalPages} · ${list.length} обяви общо</div>
+      </div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5px;">
+      <thead>
+        <tr style="background:#eef1f4;">
+          ${cols.map(c => `<th style="text-align:left;padding:5px 6px;border:1px solid #d0d7de;white-space:nowrap;">${c[0]}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${shown.map((r,i) => `<tr style="background:${i%2?'#fafbfc':'#ffffff'};">
+          ${cols.map(c => `<td style="padding:5px 6px;border:1px solid #d0d7de;vertical-align:top;">${(c[1](r)+'').replace(/</g,'&lt;')}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:12px;font-size:10px;color:#8c959f;">0889 099 118 · novvek.bg</div>
+  `;
+  return el;
+}
+
+async function exportPagePdf(){
+  if (!downloadsCap || pdfBtn.disabled) return;
+  pdfBtn.disabled = true;
+  const originalLabel = pdfBtn.textContent;
+  pdfBtn.textContent = 'Генерира се…';
+  const el = buildPdfExportEl();
+  document.body.appendChild(el);
+  try {
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 8;
+    const usableW = pageW - margin * 2;
+    const usableH = pageH - margin * 2;
+    const imgW = usableW;
+    const imgH = imgW * (canvas.height / canvas.width);
+    let renderedH = 0, pageIdx = 0;
+    while (renderedH < imgH && pageIdx < 25) {
+      if (pageIdx > 0) doc.addPage();
+      doc.addImage(imgData, 'JPEG', margin, margin - renderedH, imgW, imgH, undefined, 'FAST');
+      renderedH += usableH;
+      pageIdx++;
+    }
+    const blob = doc.output('blob');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fname = `imoten-radar-varna-${state.pool}-str${state.page}-${dateStr}.pdf`;
+    await downloadsCap.save({ filename: fname, data: blob });
+  } catch (e) {
+    console.error('PDF export грешка:', e);
+  } finally {
+    document.body.removeChild(el);
+    pdfBtn.disabled = false;
+    pdfBtn.textContent = originalLabel;
+  }
+}
+
+pdfBtn.addEventListener('click', exportPagePdf);
+
+</script>
+
+
+</body></html>
