@@ -66,11 +66,15 @@ def days_between(a, b):
     return (date(yb, mb, db) - date(ya, ma, da)).days
 
 
-def build_raw_and_meta():
-    files = sorted(glob.glob(os.path.join(HIST_DIR, "properties_varna_*.csv")))
+def build_raw_and_meta(
+    pattern="properties_varna_*.csv",
+):
+    files = sorted(glob.glob(os.path.join(HIST_DIR, pattern)))
     if not files:
         raise SystemExit(f"Няма history файлове в {HIST_DIR}")
-    file_dates = [os.path.basename(fp)[len("properties_varna_"):-4] for fp in files]
+    prefix = pattern.split("*", 1)[0]
+    file_dates = [os.path.basename(fp)[len(prefix):-4] for fp in files]
+    trend_months = set(sorted({fdate[:7] for fdate in file_dates})[-2:])
 
     listings = {}
     for fdate, fpath in zip(file_dates, files):
@@ -113,8 +117,15 @@ def build_raw_and_meta():
                         "lastSeen": fdate,
                         "timesSeen": 1,
                         "firstPrice": price,
+                        "reductionCount": 0,
+                        "lastReductionDate": None,
+                        "monthly": {},
                     }
                 else:
+                    previous_price = rec["price"]
+                    if price is not None and previous_price is not None and price < previous_price:
+                        rec["reductionCount"] += 1
+                        rec["lastReductionDate"] = fdate
                     rec["lastSeen"] = fdate
                     rec["timesSeen"] += 1
                     rec["tip"] = tip
@@ -132,6 +143,8 @@ def build_raw_and_meta():
                     rec["fromInvestor"] = (row.get("От_инвеститор") or "").strip().upper() == "YES"
                     rec["seller"] = (row.get("Тип_продавач") or "").strip() or rec["seller"]
                     rec["photo"] = (row.get("Снимка_URL") or "").strip() or rec["photo"]
+                if fdate[:7] in trend_months and ppm is not None:
+                    rec["monthly"][fdate[:7]] = {"month": fdate[:7], "ppm": ppm}
                 listings[link] = rec
 
     latest_date = file_dates[-1]
@@ -146,9 +159,11 @@ def build_raw_and_meta():
             drop = {"from": first_price, "to": rec["price"], "pct": pct}
         out = dict(rec)
         out["daysSpan"] = days_between(rec["firstSeen"], rec["lastSeen"])
+        out["marketDays"] = days_between(rec["firstSeen"], latest_date) if rec["lastSeen"] == latest_date else out["daysSpan"]
         out["active"] = rec["lastSeen"] == latest_date
         out["isNew"] = rec["firstSeen"] == latest_date
         out["drop"] = drop
+        out["monthly"] = list(rec["monthly"].values())
         raw.append(out)
 
     meta = {"earliest": earliest_date, "latest": latest_date, "runCount": len(files)}
@@ -166,38 +181,70 @@ def fit_under_limit(raw, meta):
     """Намалява размера на raw-data, докато цялата страница се събере под MAX_BYTES."""
     with open(SHELL_PATH, encoding="utf-8") as fh:
         shell = fh.read()
-    overhead = len(shell.encode("utf-8")) - len("__RAW_DATA_JSON__") - len("__META_DATA_JSON__")
+    placeholders = [
+        "__RAW_DATA_JSON__",
+        "__META_DATA_JSON__",
+    ]
+    overhead = len(shell.encode("utf-8")) - sum(len(item) for item in placeholders)
 
     desc_len = 180
     drop_stale = False
     for attempt in range(6):
-        rows = raw
-        if drop_stale:
-            rows = [r for r in raw if r["active"] or r["timesSeen"] > 1]
-        trimmed = [trim_desc(dict(r), desc_len) for r in rows]
-        raw_json = json.dumps(trimmed, ensure_ascii=False, separators=(",", ":"))
+        rows = raw if not drop_stale else [r for r in raw if r["active"] or r["timesSeen"] > 1]
+        raw_json = json.dumps(
+            [trim_desc(dict(r), desc_len) for r in rows],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         meta_json = json.dumps(meta, ensure_ascii=False, separators=(",", ":"))
-        total = overhead + len(raw_json.encode("utf-8")) + len(meta_json.encode("utf-8"))
+        total = overhead + sum(
+            len(value.encode("utf-8"))
+            for value in (raw_json, meta_json)
+        )
         if total <= MAX_BYTES:
-            return shell, raw_json, meta_json, len(rows), len(raw)
+            return (
+                shell,
+                raw_json,
+                meta_json,
+                len(rows),
+                len(raw),
+            )
         if desc_len > 60:
             desc_len -= 40
         else:
             drop_stale = True
             desc_len = 100
     # последен опит, каквото и да излезе
-    return shell, raw_json, meta_json, len(rows), len(raw)
+    return (
+        shell,
+        raw_json,
+        meta_json,
+        len(rows),
+        len(raw),
+    )
 
 
 def main():
     raw, meta = build_raw_and_meta()
-    shell, raw_json, meta_json, kept, total = fit_under_limit(raw, meta)
-    html = shell.replace("__RAW_DATA_JSON__", raw_json, 1).replace("__META_DATA_JSON__", meta_json, 1)
+    (
+        shell,
+        raw_json,
+        meta_json,
+        kept,
+        total,
+    ) = fit_under_limit(raw, meta)
+    html = (
+        shell.replace("__RAW_DATA_JSON__", raw_json, 1)
+        .replace("__META_DATA_JSON__", meta_json, 1)
+    )
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as fh:
         fh.write(html)
     size_mb = os.path.getsize(OUT_PATH) / 1e6
-    print(f"Радар генериран: {OUT_PATH} ({size_mb:.1f} MB, {kept}/{total} обяви, период {meta['earliest']}–{meta['latest']})")
+    print(
+        f"Радар генериран: {OUT_PATH} ({size_mb:.1f} MB, {kept}/{total} обяви, "
+        f"период {meta['earliest']}–{meta['latest']})"
+    )
 
 
 if __name__ == "__main__":

@@ -60,10 +60,6 @@ PROPERTY_TYPES = {
 AGENCY_WORDS = re.compile(
     r'агенция|брокер|имоти\b|недвижими\s+имоти|real\s+estate|estate|properties|properti|инвест|invest|agency', re.I
 )
-PRIVATE_WORDS = re.compile(
-    r'собственик|частно\s+лице|без\s+посредник|лично', re.I
-)
-
 # ── Наеми, промъкнали се сред обявите за продажба ──────────────────
 # Търсим само в "продажби" раздели на сайтовете, но понякога наемна
 # обява се промъква (грешна категория на подателя, или сайтът я показва
@@ -966,7 +962,6 @@ def scrape_alo(context) -> list[dict]:
 
                         desc_el = card.query_selector(".listtop-desc")
                         desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text() if desc_el else ''}"), 600)
-
                         img_el = card.query_selector("img.listtop-image-img")
                         img = img_el.get_attribute("src") if img_el else ""
                         if img and not img.startswith("http"):
@@ -1093,7 +1088,8 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
             try:
                 # По-рано тук прескачахме обявите от агенции (маркер ".seller").
                 # Сега ги пазим, само таг-нати — виж "Тип_продавач" по-долу.
-                seller_label = seller_override or ("агенция" if card.query_selector(".seller") else "частно лице")
+                seller_marker = card.query_selector(".seller") is not None
+                seller_label = seller_override or ("агенция" if seller_marker else "частно лице")
 
                 title_el = card.query_selector(".zaglavie a.title")
                 if not title_el:
@@ -1509,7 +1505,9 @@ def main():
     history_file = f"{HISTORY_DIR}/properties_varna_{date.today().isoformat()}.csv"
     df.to_csv(history_file, index=False, encoding="utf-8-sig")
 
-    print(f"\n✅ ГОТОВО — {len(df)} уникални обяви → {OUTPUT_FILE} и {history_file}")
+    print(
+        f"\n✅ ГОТОВО — {len(df)} обяви → {OUTPUT_FILE} и {history_file}"
+    )
     print(df["Източник"].map(site_from_link).value_counts().to_string())
     print(df["Тип_имот"].value_counts().to_string())
     print(df["Тип_продавач"].value_counts().to_string())
