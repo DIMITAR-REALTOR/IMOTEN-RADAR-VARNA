@@ -177,12 +177,17 @@
   tbody td{ padding:9px 11px; vertical-align:top; color:var(--text); }
   td.num{ font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap; }
   td.loc{ max-width:150px; }
-  td.desc{ max-width:280px; color:var(--muted); line-height:1.45; }
-  td.desc a.clip{
+  td.listing-cell{ min-width:310px; max-width:390px; }
+  .listing-content{ display:flex; align-items:flex-start; gap:10px; }
+  .listing-media{ display:block; flex:0 0 80px; width:80px; height:60px; }
+  .listing-photo{ display:block; width:80px; height:60px; }
+  .listing-copy{ min-width:0; flex:1 1 auto; }
+  .listing-heading{ display:flex; align-items:flex-start; flex-wrap:wrap; gap:5px 7px; margin-bottom:4px; }
+  .listing-title{
     color:var(--text); text-decoration:none; font-weight:400;
-    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-width:0;
   }
-  td.desc a.clip:hover{ color:var(--accent); }
+  .listing-title:hover{ color:var(--accent); }
   td.hist{ font-family:var(--mono); font-size:11px; color:var(--muted); white-space:nowrap; }
 
   .src-pill{
@@ -209,8 +214,8 @@
   .tag.newbuild{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
   .tag.deal{ background:color-mix(in srgb, var(--good) 20%, transparent); color:var(--good); }
   .tag.top3{ background:color-mix(in srgb, var(--warn) 22%, transparent); color:var(--warn); }
-  .thumb{ width:56px; height:40px; object-fit:cover; border-radius:4px; display:block; background:var(--surface-2); }
-  .thumb-empty{ width:56px; height:40px; border-radius:4px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:9px; }
+  .thumb{ width:80px; height:60px; object-fit:cover; border-radius:5px; display:block; background:var(--surface-2); }
+  .thumb-empty{ width:80px; height:60px; border:1px solid var(--border); border-radius:5px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:9px; text-align:center; padding:4px; }
 
   .phone{ font-family:var(--mono); }
   .phone.empty{ color:var(--faint); }
@@ -229,8 +234,13 @@
   .seller-box.agency .big{ color:var(--accent); }
   .seller-box.private .big{ color:var(--good); }
   .seller-note{ margin-top:10px; font-size:11.5px; color:var(--muted); text-align:center; }
-  .src-pill.seller-private{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
-  .src-pill.seller-agency{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+  .seller-badge{
+    display:inline-flex; align-items:center; min-height:20px; padding:2px 7px;
+    border:1px solid transparent; border-radius:5px; font-size:10px; font-weight:600; white-space:nowrap;
+  }
+  .seller-badge.private{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .seller-badge.agency{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+  .seller-badge.unknown{ background:color-mix(in srgb, var(--muted) 14%, transparent); border-color:var(--border-2); color:var(--muted); }
 
   @media (max-width:900px){
     .stats{ grid-template-columns:repeat(3,1fr); }
@@ -320,9 +330,9 @@
       <button data-v="drop">Само с намалена цена</button>
     </div>
     <div class="chip-toggle" id="f-seller">
-      <button data-v="all" class="active">Продавач: всички</button>
-      <button data-v="частно лице">Частни</button>
-      <button data-v="агенция">Агенции</button>
+      <button data-v="all" class="active">Всички</button>
+      <button data-v="private">Частни лица</button>
+      <button data-v="agency">Агенции</button>
     </div>
     <div class="chip-toggle" id="f-invest">
       <button data-v="all" class="active">Инвеститор: всички</button>
@@ -331,7 +341,7 @@
     <select id="f-src">
       <option value="all">Всички източници</option>
       <option value="IMOT.BG">IMOT.BG</option>
-      <option value="OLX">OLX</option>
+      <option value="OLX.BG">OLX</option>
       <option value="ALO.BG">ALO.BG</option>
     </select>
     <select id="f-tip">
@@ -350,7 +360,7 @@
     <table>
       <thead>
         <tr>
-          <th>Снимка</th>
+          <th data-sort="seller">Обява / продавач</th>
           <th data-sort="tip">Тип</th>
           <th data-sort="loc">Локация</th>
           <th data-sort="sqm">Площ <span class="arrow">↕</span></th>
@@ -361,8 +371,6 @@
           <th data-sort="daysSpan">На пазара <span class="arrow">↕</span></th>
           <th data-sort="phone">Телефон</th>
           <th data-sort="src">Извор</th>
-          <th data-sort="seller">Продавач</th>
-          <th>Обява</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -435,6 +443,27 @@ document.getElementById('f-matrix-room').addEventListener('change', e => renderM
 let chartEligibleAll = [];
 let chartTypeLabel = 'апартаменти';
 let chartPoolLabel = 'продажби';
+function sellerCategory(value){
+  const normalized = typeof value === 'string' ? value.trim().toLocaleLowerCase('bg-BG') : '';
+  if (normalized === 'частно лице') return 'private';
+  if (normalized === 'агенция') return 'agency';
+  return 'unknown';
+}
+function sellerLabel(value){
+  const category = sellerCategory(value);
+  if (category === 'private') return 'Частно лице';
+  if (category === 'agency') return 'Агенция';
+  return 'Неизвестно';
+}
+function validPhotoUrl(value){
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 function drawTrendChart(districtFilter){
   const eligible = (!districtFilter || districtFilter === 'all')
     ? chartEligibleAll
@@ -546,8 +575,9 @@ function renderPool(){
   const active = rows.filter(r => r.active);
   const withPhone = rows.filter(r => r.phone);
   const drops = rows.filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3);
-  const activeAgency = active.filter(r => r.seller === 'агенция').length;
-  const activePrivate = active.filter(r => r.seller === 'частно лице').length;
+  const activeAgency = active.filter(r => sellerCategory(r.seller) === 'agency').length;
+  const activePrivate = active.filter(r => sellerCategory(r.seller) === 'private').length;
+  const activeUnknown = active.filter(r => sellerCategory(r.seller) === 'unknown').length;
 
   const statDefs = [
     {n: rows.length, l: 'Уникални обяви', cls: ''},
@@ -565,8 +595,8 @@ function renderPool(){
 
   // ── findings ──────────────────────────────────────────────
   const imotRows = rows.filter(r => r.src === 'IMOT.BG');
-  const olxRows = rows.filter(r => r.src === 'OLX');
-  const focusEligible = scopedSales;
+  const olxRows = rows.filter(r => r.src === 'OLX.BG');
+  const focusEligible = scopedSales.filter(r => sellerCategory(r.seller) === 'private');
   const [ppmLo, ppmHi] = ppmRange();
   const focusPpm = focusEligible.filter(r => r.ppm && r.ppm >= ppmLo && r.ppm <= ppmHi).map(r => r.ppm).sort((a,b)=>a-b);
   const medPpm = median(focusPpm);
@@ -608,7 +638,7 @@ function renderPool(){
     {
       cls: 'accent',
       html: activeAgency + activePrivate > 0
-        ? `<b>${Math.round(activeAgency/(activeAgency+activePrivate)*100)}% от активните обяви са на агенции</b> <span class="note">— ${activeAgency} от агенции срещу ${activePrivate} от частни лица, в най-новия обход.</span>`
+        ? `<b>${Math.round(activeAgency/(activeAgency+activePrivate)*100)}% от активните обяви с известен продавач са на агенции</b> <span class="note">— ${activeAgency} от агенции срещу ${activePrivate} от частни лица; ${activeUnknown} с неизвестен тип не участват.</span>`
         : `<b>Няма данни за тип продавач в най-новия обход</b> <span class="note"></span>`
     },
   ];
@@ -630,7 +660,7 @@ function renderPool(){
     const chartUnitSuffix = state.pool === 'rent' ? ' на месец (наем)' : '';
     if (chartTitle) chartTitle.textContent = `Медианна €/кв.м${chartUnitSuffix} за ${chartTypeLabel} по месеци`;
     const [chPpmLo, chPpmHi] = ppmRange();
-    const base = scopedSales.filter(r => r.ppm && r.ppm >= chPpmLo && r.ppm <= chPpmHi && r.seller !== 'агенция');
+    const base = scopedSales.filter(r => r.ppm && r.ppm >= chPpmLo && r.ppm <= chPpmHi && sellerCategory(r.seller) === 'private');
     chartEligibleAll = base;
 
     const districtCounts = {};
@@ -747,9 +777,9 @@ function renderPool(){
     const titleHint = document.getElementById('seller-compare-hint');
     if (titleHint) titleHint.textContent = state.focus === 'апартамент' ? '— апартаменти, медианна цена/кв.м' : state.focus === 'business' ? '— бизнес имоти, медианна цена/кв.м' : '— всички имоти, медианна цена/кв.м';
     const base = scopedSales;
-    const withUnknown = base.filter(r => !r.seller).length;
+    const withUnknown = base.filter(r => sellerCategory(r.seller) === 'unknown').length;
     const statsFor = seller => {
-      const items = base.filter(r => r.seller === seller);
+      const items = base.filter(r => sellerCategory(r.seller) === seller);
       const withPpmItems = items.filter(r => r.ppm && r.ppm > 50);
       return {
         n: items.length,
@@ -759,7 +789,7 @@ function renderPool(){
         nPpm: withPpmItems.length,
       };
     };
-    const p = statsFor('частно лице'), a = statsFor('агенция');
+    const p = statsFor('private'), a = statsFor('agency');
     const box = (cls, label, s) => `
       <div class="seller-box ${cls}">
         <div class="who">${label}</div>
@@ -795,7 +825,7 @@ function applyFilters(){
     if (state.src !== 'all' && r.src !== state.src) return false;
     if (state.tip !== 'all' && r.tip !== state.tip) return false;
     if (state.phone === 'yes' && !r.phone) return false;
-    if (state.seller !== 'all' && r.seller !== state.seller) return false;
+    if (state.seller !== 'all' && sellerCategory(r.seller) !== state.seller) return false;
     if (state.q) {
       const hay = (r.loc + ' ' + r.desc).toLowerCase();
       if (!hay.includes(state.q.toLowerCase())) return false;
@@ -838,12 +868,22 @@ function render(list){
       ? '<span class="tag active">АКТИВНА</span>'
       : '<span class="tag gone">НЕ Е В ПОСЛЕДНИЯ</span>';
     const dropTag = r.drop ? `<span class="tag drop">${r.drop.pct}%</span>` : '';
-    const proxiedPhoto = r.photo ? `https://images.weserv.nl/?url=${encodeURIComponent(r.photo.replace(/^https?:\/\//,''))}&w=112&h=80&fit=cover` : null;
-    const photoCell = r.photo
-      ? `<a href="${r.link}" target="_blank" rel="noopener"><img class="thumb" src="${proxiedPhoto}" loading="lazy" alt="" referrerpolicy="no-referrer" onerror='this.onerror=null;this.outerHTML="<div class=\"thumb-empty\">—</div>"'></a>`
-      : '<div class="thumb-empty">—</div>';
+    const photoUrl = validPhotoUrl(r.photo);
+    const photoCell = photoUrl
+      ? `<a class="listing-photo" href="${r.link}" target="_blank" rel="noopener"><img class="thumb" src="${photoUrl}" width="80" height="60" loading="lazy" decoding="async" alt="" referrerpolicy="no-referrer" onerror='this.onerror=null;const p=document.createElement("span");p.className="thumb-empty";p.textContent="Няма снимка";p.setAttribute("aria-label","Снимката не е достъпна");this.replaceWith(p)'></a>`
+      : '<span class="thumb-empty" aria-label="Няма снимка" title="Няма снимка">Няма снимка</span>';
+    const sellerKind = sellerCategory(r.seller);
+    const sellerBadge = `<span class="seller-badge ${sellerKind}">${sellerLabel(r.seller)}</span>`;
     return `<tr class="${r.active ? '' : 'inactive'}">
-      <td>${photoCell}</td>
+      <td class="listing-cell">
+        <div class="listing-content">
+          <div class="listing-media">${photoCell}</div>
+          <div class="listing-copy">
+            <div class="listing-heading"><a href="${r.link}" target="_blank" rel="noopener" class="listing-title">${descText || r.loc || 'Обява →'}</a>${sellerBadge}</div>
+            ${tags.length ? `<div>${tags.join('')}</div>` : ''}
+          </div>
+        </div>
+      </td>
       <td>${r.tip}</td>
       <td class="loc">${r.loc||'—'}</td>
       <td class="num">${r.sqm ? fmtInt(r.sqm)+' м²' : '—'}</td>
@@ -854,13 +894,8 @@ function render(list){
       <td class="hist">${r.firstSeen} → ${r.lastSeen}<br>(${r.daysSpan} дни)</td>
       <td>${r.phone ? `<span class="phone">${r.phone}</span>` : '<span class="phone empty">—</span>'}</td>
       <td><span class="src-pill ${r.src==='IMOT.BG'?'imot':(r.src==='ALO.BG'?'alo':'olx')}">${r.src}</span></td>
-      <td>${r.seller ? `<span class="src-pill ${r.seller==='агенция'?'seller-agency':'seller-private'}">${r.seller==='агенция'?'Агенция':'Частно'}</span>` : '<span class="phone empty">—</span>'}</td>
-      <td class="desc">
-        ${tags.length ? `<div style="margin-bottom:3px">${tags.join('')}</div>` : ''}
-        <a href="${r.link}" target="_blank" rel="noopener" class="clip">${descText || r.loc || 'Обява →'}</a>
-      </td>
     </tr>`;
-  }).join('') + (shown.length === 0 ? `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:14px;">Няма обяви по тези филтри.</td></tr>` : '');
+  }).join('') + (shown.length === 0 ? `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:14px;">Няма обяви по тези филтри.</td></tr>` : '');
   renderPager(totalPages);
 }
 
@@ -946,7 +981,7 @@ function buildPdfExportEl(){
     ['На пазара', r => `${r.firstSeen} → ${r.lastSeen} (${r.daysSpan}д)`],
     ['Телефон', r => r.phone || '—'],
     ['Извор', r => r.src],
-    ['Продавач', r => r.seller || '—'],
+    ['Продавач', r => sellerLabel(r.seller)],
     ['Обява', r => (r.desc || r.loc || '').replace(/\s*\.\.\.\s*$/,'…').slice(0,70)],
   ];
 
@@ -956,7 +991,7 @@ function buildPdfExportEl(){
   if (state.invest === 'yes') filterBits.push('от инвеститор');
   if (state.src !== 'all') filterBits.push(state.src);
   if (state.tip !== 'all') filterBits.push(state.tip);
-  if (state.seller !== 'all') filterBits.push(state.seller);
+  if (state.seller !== 'all') filterBits.push(state.seller === 'private' ? 'Частни лица' : 'Агенции');
   if (state.phone === 'yes') filterBits.push('само с телефон');
   if (state.q) filterBits.push(`търсене: "${state.q}"`);
 
