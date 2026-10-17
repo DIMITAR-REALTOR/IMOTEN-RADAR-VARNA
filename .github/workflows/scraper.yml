@@ -70,3 +70,10 @@ jobs:
           git config user.email "github-actions[bot]@github.com"
           git add data/properties_varna.csv data/history/ data/photos/ docs/ 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "📊 Обяви $(date +'%d.%m.%Y')" && git push)
+
+      - name: Съдържане на обявите в REMI AI
+        if: success()
+        env:
+          REMI_API_URL: ${{ secrets.REMI_API_URL }}
+          REMI_INGESTION_SECRET: ${{ secrets.REMI_INGESTION_SECRET }}
+        run: python -u scripts/sync_to_remi.py
