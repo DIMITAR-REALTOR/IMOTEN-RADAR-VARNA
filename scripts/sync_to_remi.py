@@ -1,6 +1,5 @@
 import csv
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -12,14 +11,7 @@ BG_MONTHS = {
     "юли": 7, "август": 8, "септември": 9, "октомври": 10, "ноември": 11, "декември": 12,
 }
 
-PROPERTY_TYPE_MAP = {
-    "апартамент": "apartment", "къща": "house", "парцел": "land", "гараж": "garage",
-    "търговски": "business", "офис": "business", "земеделска": "business", "друго": "other",
-}
-
 DEAL_TYPE_MAP = {"продажба": "sale", "наем": "rent"}
-
-SELLER_TYPE_MAP = {"частно лице": "private", "агенция": "agency"}
 
 SOURCE_BY_HOST = {"olx.bg": "olx_bg", "alo.bg": "alo_bg", "imot.bg": "imot_bg"}
 
@@ -67,40 +59,27 @@ def row_to_property(row):
         except (ValueError, TypeError):
             area_sqm = None
 
-    seller_type = SELLER_TYPE_MAP.get((row.get("Тип_продавач") or "").strip().lower(), "unknown")
-    if (row.get("От_инвеститор") or "").strip().upper() == "YES":
-        seller_type = "investor"
-
-    photos = []
+    photo_url = None
     img = (row.get("Снимка_URL") or "").strip()
     if img:
-        photos.append(img)
-
-    phones = []
-    phone = (row.get("Телефон") or "").strip()
-    if phone:
-        phones.extend([p for p in re.split(r"\s*\|\s*", phone) if p])
+        photo_url = img
 
     return {
-        "external_id": (row.get("ID_обява") or "").strip(),
+        "source_listing_id": (row.get("ID_обява") or "").strip(),
         "source_url": link,
         "title": title,
         "description": description,
         "price_eur": price_eur,
-        "price_currency_confidence": "unknown",
         "area_sqm": area_sqm,
-        "property_type": PROPERTY_TYPE_MAP.get((row.get("Тип_имот") or "").strip().lower(), "other"),
-        "deal_type": DEAL_TYPE_MAP.get((row.get("Тип_сделка") or "").strip().lower(), "sale"),
-        "seller_type": seller_type,
+        "property_type": (row.get("Тип_имот") or "").strip() or None,
+        "transaction_type": DEAL_TYPE_MAP.get((row.get("Тип_сделка") or "").strip().lower(), "sale"),
         "city": "Варна",
         "neighborhood": (row.get("Локация-район") or "").strip() or None,
-        "raw_location": (row.get("Локация-район") or "").strip() or None,
-        "phones": phones,
-        "photos": photos,
-        "published_at": parse_published_at(row.get("Дата_обява")),
-        "urgent": (row.get("Спешност") or "").strip().upper() == "YES",
-        "new_build": (row.get("Ново_строителство") or "").strip().upper() == "YES",
-        "from_investor": (row.get("От_инвеститор") or "").strip().upper() == "YES",
+        "urgency": (row.get("Спешност") or "").strip() or None,
+        "is_new_construction": (row.get("Ново_строителство") or "").strip().upper() == "YES",
+        "is_from_investor": (row.get("От_инвеститор") or "").strip().upper() == "YES",
+        "photo_url": photo_url,
+        "listing_date": parse_published_at(row.get("Дата_обява")),
     }
 
 
