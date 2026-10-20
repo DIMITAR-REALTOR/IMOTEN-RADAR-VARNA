@@ -78,6 +78,7 @@
   /* ── PANELS ─────────────────────────────────────────────── */
   .row2{ display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-bottom:22px; align-items:stretch; }
   .row3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:22px; align-items:stretch; }
+  .row3 #district-panel{ grid-column:1 / -1; }
   .panel{
     background:var(--surface); border:1px solid var(--border); border-radius:10px;
     padding:18px 20px; min-width:0;
@@ -116,6 +117,7 @@
   /* ── CHART ──────────────────────────────────────────────── */
   .chart-wrap svg{ width:100%; height:auto; overflow:visible; }
   .chart-axis{ font-family:var(--mono); font-size:9.5px; fill:var(--muted); }
+  #scatter .scatter-axis{ font-size:11px; fill:var(--text); }
   .chart-line{ fill:none; stroke:var(--accent); stroke-width:2; }
   .chart-area{ fill:var(--accent); opacity:.10; }
   .chart-dot{ fill:var(--accent); }
@@ -135,6 +137,10 @@
   .insight-table-wrap{ overflow:auto; max-height:360px; min-width:0; }
   .insight-table{ width:100%; min-width:900px; border-collapse:collapse; font-size:11px; }
   .insight-table th,.insight-table td{ padding:7px 8px; border-bottom:1px solid var(--border); text-align:right; white-space:nowrap; }
+  #district-stats{ overflow:visible; max-height:none; }
+  #district-stats .insight-table{ min-width:0; table-layout:fixed; font-size:11px; }
+  #district-stats .insight-table th,#district-stats .insight-table td{ padding:8px 6px; white-space:normal; overflow-wrap:anywhere; }
+  #district-stats .insight-table th:first-child,#district-stats .insight-table td:first-child{ width:18%; }
   .insight-table th{ position:sticky; top:0; background:var(--surface-2); color:var(--muted); font:500 9px var(--mono); text-transform:uppercase; }
   .insight-table th:first-child,.insight-table td:first-child{text-align:left}
   .insight-table td{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -283,6 +289,19 @@
     .overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     .findings{ grid-template-columns:1fr; }
     header{ flex-direction:column; }
+    #district-stats .insight-table,
+    #district-stats .insight-table thead,
+    #district-stats .insight-table tbody,
+    #district-stats .insight-table tr,
+    #district-stats .insight-table th,
+    #district-stats .insight-table td{ display:block; width:auto; }
+    #district-stats .insight-table thead{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    #district-stats .insight-table tbody{ display:grid; gap:9px; }
+    #district-stats .insight-table tr{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 10px; padding:8px 10px; border:1px solid var(--border); border-radius:7px; background:var(--surface-2); }
+    #district-stats .insight-table td{ display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:7px 0; border:0; text-align:left; font-size:11px; }
+    #district-stats .insight-table td:first-child{ grid-column:1 / -1; width:auto; font-size:12px; font-weight:600; }
+    #district-stats .insight-table td::before{ content:attr(data-label); color:var(--muted); font:500 9px var(--mono); text-transform:uppercase; }
+    #district-stats .insight-table td:first-child::before{ content:none; }
   }
 </style>
 
@@ -394,7 +413,7 @@
       <h2 id="type-title">Медианна цена по тип имот <span class="hint">(само активни обяви)</span></h2>
       <div class="bar-list scroll-list" id="type-stats"></div>
     </div>
-    <div class="panel">
+    <div class="panel" id="district-panel">
       <h2 id="district-title">Апартаменти по квартал <span class="hint">(медианна цена и €/кв.м)</span></h2>
       <div class="insight-table-wrap" id="district-stats"></div>
     </div>
@@ -497,7 +516,6 @@ const dayDiff = (from, to) => {
   return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, Math.floor((b-a)/86400000)) : 0;
 };
 
-// ── business-property detection ─────────────────────────────
 const BIZ_RE = /склад|магазин|търговск|хотел|ресторант|кафене|заведение|шоурум|промишлен|индустриал|автосервиз|бензиностанция|логистичен|производствен|бизнес\s*сграда|бизнес\s*център/i;
 function isBusiness(r){
   if (r.tip === 'офис' || r.tip === 'търговски') return true;
@@ -543,6 +561,12 @@ function sellerCategory(value){
   if (normalized === 'частно лице') return 'private';
   if (normalized === 'агенция') return 'agency';
   return 'unknown';
+}
+function matchesSellerFilter(r){
+  return state.seller === 'all' || sellerCategory(r.seller) === state.seller;
+}
+function sellerFilterLabel(){
+  return state.seller === 'private' ? 'частни лица' : state.seller === 'agency' ? 'агенции' : state.seller === 'unknown' ? 'неидентифицирани' : 'всички продавачи';
 }
 function sellerLabel(value){
   const category = sellerCategory(value);
@@ -608,7 +632,7 @@ function drawTrendChart(districtFilter){
   const districtLabel = (!districtFilter || districtFilter === 'all') ? '' : `, само ${districtFilter}`;
   const thinMonths = TREND.filter(t => t.n < 30).length;
   document.getElementById('chart-cap').textContent =
-    `Медианна цена/кв.м по месец на обхода — ${chartPoolLabel}, само частни лица, ${chartTypeLabel}${districtLabel} (n=${TREND.reduce((a,t)=>a+t.n,0)} обявени точки, брой по месец в скоби до датите).` +
+    `Медианна цена/кв.м по месец на обхода — ${chartPoolLabel}, ${sellerFilterLabel()}, ${chartTypeLabel}${districtLabel} (n=${TREND.reduce((a,t)=>a+t.n,0)} обявени точки, брой по месец в скоби до датите).` +
     (excludedCount ? ` Текущият месец (${excludedCount} обяви) не е показан — все още тече и не е сравним с пълните месеци.` : '') +
     (thinMonths ? ` Внимание: ${thinMonths} от показаните месеци имат под 30 обяви — медианата там е по-шумна, не я цитирай пред клиент като сигурна тенденция.` : '');
 }
@@ -645,6 +669,7 @@ document.querySelectorAll('#pool-tabs button').forEach(b => b.addEventListener('
 function renderPool(){
   const pool = POOLS[state.pool];
   rows = RAW.filter(pool.base);
+  const statsRows = rows.filter(matchesSellerFilter);
   const poolMeta = META;
   document.getElementById('run-range').textContent = poolMeta.earliest && poolMeta.latest
     ? `${poolMeta.earliest} – ${poolMeta.latest}`
@@ -654,7 +679,7 @@ function renderPool(){
   // ── "изгодна оферта" / топ 3 (спрямо медиана €/кв.м за (тип+стаи)+район, само активни) ──
   (function computeDeals(){
     const [lo, hi] = ppmRange();
-    const activeRows = rows.filter(r => r.active && typeof r.ppm === 'number' && r.ppm >= lo && r.ppm <= hi && r.loc);
+    const activeRows = statsRows.filter(r => r.active && typeof r.ppm === 'number' && r.ppm >= lo && r.ppm <= hi && r.loc);
     const groups = new Map();
     activeRows.forEach(r => {
       const key = (r.tip === 'апартамент' ? (r.tip_fine || r.tip) : r.tip) + '|' + r.loc;
@@ -679,21 +704,21 @@ function renderPool(){
   })();
 
   // ── stat cards ────────────────────────────────────────────
-  const sales = rows;
+  const sales = statsRows;
   const scopedSales = state.focus === 'all' ? sales : sales.filter(matchesFocus);
-  const active = rows.filter(r => r.active);
+  const active = sales.filter(r => r.active);
   const activeScopedSales = scopedSales.filter(r => r.active);
-  const withPhone = rows.filter(r => r.phone);
-  const drops = rows.filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3);
+  const withPhone = sales.filter(r => r.phone);
+  const drops = sales.filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3);
   const activeAgency = active.filter(r => sellerCategory(r.seller) === 'agency').length;
   const activePrivate = active.filter(r => sellerCategory(r.seller) === 'private').length;
   const activeUnknown = active.filter(r => sellerCategory(r.seller) === 'unknown').length;
 
   const statDefs = [
-    {n: rows.length, l: 'Уникални обяви', cls: ''},
+    {n: sales.length, l: 'Уникални обяви', cls: ''},
     {n: sales.length, l: pool.label, cls: 'accent'},
     {n: active.length, l: 'Активни сега', cls: 'good'},
-    {n: rows.length - active.length, l: 'Не са в последния обход', cls: ''},
+    {n: sales.length - active.length, l: 'Не са в последния обход', cls: ''},
     {n: withPhone.length, l: 'С телефон', cls: 'good'},
     {n: drops.length, l: 'С намалена цена', cls: 'warn'},
     {n: activeAgency, l: 'Активни от агенции', cls: 'accent'},
@@ -704,26 +729,26 @@ function renderPool(){
   ).join('');
 
   // ── findings ──────────────────────────────────────────────
-  const imotRows = rows.filter(r => r.src === 'IMOT.BG');
-  const olxRows = rows.filter(r => r.src === 'OLX.BG');
-  const focusEligible = activeScopedSales.filter(r => sellerCategory(r.seller) === 'private');
+  const imotRows = sales.filter(r => r.src === 'IMOT.BG');
+  const olxRows = sales.filter(r => r.src === 'OLX.BG');
+  const focusEligible = activeScopedSales;
   const [ppmLo, ppmHi] = ppmRange();
   const focusPpm = focusEligible.filter(r => r.ppm && r.ppm >= ppmLo && r.ppm <= ppmHi).map(r => r.ppm).sort((a,b)=>a-b);
   const medPpm = median(focusPpm);
-  const delistedSeenMulti = rows.filter(r => !r.active && r.timesSeen > 1);
+  const delistedSeenMulti = sales.filter(r => !r.active && r.timesSeen > 1);
   const avgDaysGone = delistedSeenMulti.length ? Math.round(delistedSeenMulti.reduce((a,r)=>a+r.daysSpan,0)/delistedSeenMulti.length) : null;
   const topDrop = drops.slice().sort((a,b)=>a.drop.pct-b.drop.pct)[0];
-  const focusLabel = state.focus === 'апартамент' ? 'апартамент (частни лица)' : state.focus === 'business' ? 'бизнес имот (частни лица)' : 'имот (частни лица)';
-  const relistedRows = rows.filter(r => r.relisted);
+  const focusLabel = state.focus === 'апартамент' ? 'апартамент' : state.focus === 'business' ? 'бизнес имот' : 'имот';
+  const relistedRows = sales.filter(r => r.relisted);
 
   const findings = [
     {
       cls: 'good',
-      html: `<b>${rows.length} уникални обяви от ${poolMeta.runCount} обхода</b> <span class="note">— обединени по линк на обявата от ${poolMeta.earliest || '—'} до ${poolMeta.latest || '—'}; дублиращите се сканирания на една и съща обява са слети в един ред.</span>`
+      html: `<b>${sales.length} уникални обяви от ${poolMeta.runCount} обхода</b> <span class="note">— обединени по линк на обявата от ${poolMeta.earliest || '—'} до ${poolMeta.latest || '—'}; дублиращите се сканирания на една и съща обява са слети в един ред.</span>`
     },
     {
       cls: 'warn',
-      html: `<b>Само ${active.length} от тях са в най-новия обход</b> <span class="note">— останалите ${rows.length-active.length} вече не излизат при сканиране (продадени, свалени или извън обхванатите страници).</span>`
+      html: `<b>Само ${active.length} от тях са в най-новия обход</b> <span class="note">— останалите ${sales.length-active.length} вече не излизат при сканиране (продадени, свалени или извън обхванатите страници).</span>`
     },
     {
       cls: 'good',
@@ -743,7 +768,7 @@ function renderPool(){
     },
     {
       cls: 'bad',
-      html: `<b>Телефон има само при ${withPhone.length} от ${rows.length} обяви</b> <span class="note">— IMOT.bg го дава директно (${imotRows.filter(r=>r.phone).length} от ${imotRows.length}), OLX.bg (${olxRows.length} обяви) го крие зад бутон и скрейперът засега не го изважда.</span>`
+      html: `<b>Телефон има само при ${withPhone.length} от ${sales.length} обяви</b> <span class="note">— IMOT.bg го дава директно (${imotRows.filter(r=>r.phone).length} от ${imotRows.length}), OLX.bg (${olxRows.length} обяви) го крие зад бутон и скрейперът засега не го изважда.</span>`
     },
     {
       cls: 'accent',
@@ -770,7 +795,7 @@ function renderPool(){
     const chartUnitSuffix = state.pool === 'rent' ? ' на месец (наем)' : '';
     if (chartTitle) chartTitle.textContent = `Медианна €/кв.м${chartUnitSuffix} за ${chartTypeLabel} по месеци`;
     const [chPpmLo, chPpmHi] = ppmRange();
-    const base = scopedSales.filter(r => r.ppm && r.ppm >= chPpmLo && r.ppm <= chPpmHi && sellerCategory(r.seller) === 'private');
+    const base = scopedSales.filter(r => r.ppm && r.ppm >= chPpmLo && r.ppm <= chPpmHi);
     chartEligibleAll = base;
 
     const districtCounts = {};
@@ -845,7 +870,7 @@ function renderPool(){
 
   // ── top price drops ───────────────────────────────────────
   (function renderDrops(){
-    const list = rows
+    const list = statsRows
       .filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3)
       .slice()
       .sort((a,b) => a.drop.pct - b.drop.pct)
@@ -870,7 +895,7 @@ function renderPool(){
   applyFilters();
 }
 
-function matchesCurrentFilters(r){
+function matchesCurrentFilters(r, ignoreSeller = false){
     if (state.status === 'active' && !r.active) return false;
     if (state.status === 'drop' && !(r.drop && r.drop.from > 1000 && r.drop.pct <= -3)) return false;
     if (state.focus !== 'all' && !matchesFocus(r)) return false;
@@ -878,7 +903,7 @@ function matchesCurrentFilters(r){
     if (state.src !== 'all' && r.src !== state.src) return false;
     if (state.tip !== 'all' && r.tip !== state.tip) return false;
     if (state.phone === 'yes' && !r.phone) return false;
-    if (state.seller !== 'all' && sellerCategory(r.seller) !== state.seller) return false;
+    if (!ignoreSeller && state.seller !== 'all' && sellerCategory(r.seller) !== state.seller) return false;
     if (state.newOnly && dayDiff(r.firstSeen, META.latest || r.firstSeen) > 7) return false;
     if (state.building === 'new' && !r.newBuild) return false;
     if (state.building === 'old' && r.newBuild) return false;
@@ -945,7 +970,7 @@ function renderInsights(filtered){
   const pctClass = value => value == null || value === 0 ? '' : value < 0 ? 'positive' : 'negative';
   document.getElementById('district-stats').innerHTML = districtStats.length ? `<table class="insight-table"><thead><tr><th>Квартал</th><th>Активни</th><th>Мед. цена</th><th>€/кв.м</th><th>С намаление</th><th>Средно намаление</th><th>Мед. дни</th><th>€/кв.м спрямо ${previousMonth || 'пред. месец'}</th></tr></thead><tbody>${districtStats.map(s => {
     const discountShare = s.items.length ? s.dropped.length/s.items.length*100 : 0;
-    return `<tr><td>${escapeHtml(s.district)}</td><td>${s.items.length}</td><td>${fmtEur(median(s.items.map(r=>r.price)))}</td><td>${s.medPpm == null ? '—' : `€${fmtInt(s.medPpm)}`}</td><td>${discountShare.toFixed(1)}%</td><td>${s.meanDrop == null ? '—' : `−${s.meanDrop.toFixed(1)}%`}</td><td>${s.medDays == null ? '—' : `${fmtInt(s.medDays)}д`}</td><td class="${pctClass(s.change)}">${s.change == null ? '—' : `${s.change > 0 ? '↑' : s.change < 0 ? '↓' : '→'} ${Math.abs(s.change).toFixed(1)}%`}</td></tr>`;
+    return `<tr><td data-label="Квартал">${escapeHtml(s.district)}</td><td data-label="Активни">${s.items.length}</td><td data-label="Мед. цена">${fmtEur(median(s.items.map(r=>r.price)))}</td><td data-label="€/кв.м">${s.medPpm == null ? '—' : `€${fmtInt(s.medPpm)}`}</td><td data-label="С намаление">${discountShare.toFixed(1)}%</td><td data-label="Средно намаление">${s.meanDrop == null ? '—' : `−${s.meanDrop.toFixed(1)}%`}</td><td data-label="Мед. дни">${s.medDays == null ? '—' : `${fmtInt(s.medDays)}д`}</td><td data-label="€/кв.м спрямо ${previousMonth || 'пред. месец'}" class="${pctClass(s.change)}">${s.change == null ? '—' : `${s.change > 0 ? '↑' : s.change < 0 ? '↓' : '→'} ${Math.abs(s.change).toFixed(1)}%`}</td></tr>`;
   }).join('')}</tbody></table>` : '<div class="meta">Няма достатъчно активни обяви по квартали за текущите филтри.</div>';
 
   const longDays = state.longDays;
@@ -955,8 +980,9 @@ function renderInsights(filtered){
     return `<div class="insight-row"><div>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(r.loc||'Варна')} · ${escapeHtml(r.tip)}</a>` : `${escapeHtml(r.loc||'Варна')} · ${escapeHtml(r.tip)}`}<div class="meta">${fmtEur(r.price)} · ${r.ppm == null ? '—' : `€${fmtInt(r.ppm)}/м²`} · ${r.drop && r.drop.pct <= -3 ? `намаление ${Math.abs(r.drop.pct)}%` : 'без засечено намаление'}</div></div><div class="signal">${fmtInt(r.marketDays)} дни</div></div>`;
   }).join('') : '<div class="meta">Няма активни обяви над избрания праг при тези филтри.</div>';
 
+  const sellerComparisonRows = rows.filter(r => matchesCurrentFilters(r, true));
   const sellerStats = seller => {
-    const items = filtered.filter(r => r.active && sellerCategory(r.seller) === seller);
+    const items = sellerComparisonRows.filter(r => r.active && sellerCategory(r.seller) === seller);
     const drops = items.filter(r => r.drop && r.drop.from > 1000 && r.drop.pct <= -3);
     return {n:items.length,medPpm:ppmFor(items),medPrice:median(items.map(r=>r.price)),active:items.length,
       dropShare:items.length ? drops.length/items.length*100 : null,
@@ -966,10 +992,10 @@ function renderInsights(filtered){
   const privateStats = sellerStats('private'), agencyStats = sellerStats('agency');
   const sellerBox = (cls,label,s) => `<div class="seller-box ${cls}"><div class="who">${label}</div><div class="big">${s.medPpm == null ? '—' : `€${fmtInt(s.medPpm)}/м²`}</div><div class="sub">${fmtEur(s.medPrice)} медианна цена · ${s.active} активни от ${s.n}</div><div class="sub">С намаление: ${s.dropShare == null ? '—' : `${s.dropShare.toFixed(1)}%`} · средно: ${s.meanDrop == null ? '—' : `−${s.meanDrop.toFixed(1)}%`} · мед. престой: ${s.medDays == null ? '—' : `${fmtInt(s.medDays)} дни`}</div></div>`;
   document.getElementById('seller-compare').innerHTML = sellerBox('private','Частни лица',privateStats)+sellerBox('agency','Агенции',agencyStats);
-  const unknownCount=filtered.filter(r=>sellerCategory(r.seller)==='unknown').length;
+  const unknownCount=sellerComparisonRows.filter(r=>sellerCategory(r.seller)==='unknown').length;
   if(privateStats.medPpm && agencyStats.medPpm){
     const diffPct=Math.round((privateStats.medPpm-agencyStats.medPpm)/agencyStats.medPpm*100);
-    document.getElementById('seller-note').textContent=`Частните продавачи искат ${Math.abs(diffPct)}% ${diffPct>0?'по-скъпо':'по-евтино'} на кв.м спрямо агенциите · ${unknownCount} неидентифицирани не участват. Стойностите следват текущите филтри.`;
+    document.getElementById('seller-note').textContent=`Частните продавачи искат ${Math.abs(diffPct)}% ${diffPct>0?'по-скъпо':'по-евтино'} на кв.м спрямо агенциите · ${unknownCount} неидентифицирани не участват. Сравнението следва останалите филтри.`;
   }else document.getElementById('seller-note').textContent=`Недостатъчно данни за сравнение в този избор · ${unknownCount} неидентифицирани не участват.`;
 
   const districtMedians = new Map(districtStats.filter(s=>s.items.length>=3).map(s=>[s.district,s.medPpm]));
@@ -998,10 +1024,22 @@ function renderInsights(filtered){
 
   const plotRows = active.filter(r=>r.ppm != null && r.marketDays != null).slice(0,500);
   if (plotRows.length) {
-    const W=640,H=220,L=42,R=14,T=14,B=30,maxDays=Math.max(30,...plotRows.map(r=>r.marketDays)),maxPpm=Math.max(...plotRows.map(r=>r.ppm));
-    const x=d=>L+(W-L-R)*d/maxDays, y=p=>H-B-(H-T-B)*p/(maxPpm||1);
-    const points=plotRows.map(r=>`<circle cx="${x(r.marketDays).toFixed(1)}" cy="${y(r.ppm).toFixed(1)}" r="3" fill="${r.drop?'#f85149':'#58a6ff'}" fill-opacity=".65"><title>${escapeHtml(r.loc||'Варна')} · €${fmtInt(r.ppm)}/м² · ${fmtInt(r.marketDays)} дни</title></circle>`).join('');
-    document.getElementById('scatter').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Scatter plot на цена за квадратен метър спрямо дни на пазара"><line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" class="chart-grid"/><line x1="${L}" y1="${T}" x2="${L}" y2="${H-B}" class="chart-grid"/><text class="chart-axis" x="${W/2}" y="${H-5}" text-anchor="middle">Дни от първо засичане</text><text class="chart-axis" x="10" y="12">€/кв.м</text>${points}</svg>`;
+    const W=640,H=260,L=76,R=18,T=18,B=48;
+    const maxDays=Math.max(30,...plotRows.map(r=>r.marketDays));
+    const maxPpm=Math.max(...plotRows.map(r=>r.ppm));
+    const xStep=Math.max(1,Math.ceil(maxDays/4/10)*10);
+    const yStep=Math.max(1,Math.ceil(maxPpm/4/100)*100);
+    const xMax=Math.ceil(maxDays/xStep)*xStep;
+    const yMax=Math.ceil(maxPpm/yStep)*yStep;
+    const x=d=>L+(W-L-R)*d/xMax, y=p=>H-B-(H-T-B)*p/yMax;
+    const xTicks=Array.from({length:Math.floor(xMax/xStep)+1},(_,i)=>i*xStep);
+    const yTicks=Array.from({length:Math.floor(yMax/yStep)+1},(_,i)=>i*yStep);
+    const grid=[
+      ...xTicks.map(value=>`<line class="chart-grid" x1="${x(value)}" y1="${T}" x2="${x(value)}" y2="${H-B}"/><text class="chart-axis scatter-axis" x="${x(value)}" y="${H-B+16}" text-anchor="middle">${fmtInt(value)}</text>`),
+      ...yTicks.map(value=>`<line class="chart-grid" x1="${L}" y1="${y(value)}" x2="${W-R}" y2="${y(value)}"/><text class="chart-axis scatter-axis" x="${L-8}" y="${y(value)+3}" text-anchor="end">€${fmtInt(value)}</text>`)
+    ].join('');
+    const points=plotRows.map(r=>`<circle cx="${x(r.marketDays).toFixed(1)}" cy="${y(r.ppm).toFixed(1)}" r="3" fill="${r.drop?'#f85149':'#58a6ff'}" fill-opacity=".65"><title>${escapeHtml(r.loc||'Варна')} · €${fmtInt(r.ppm)}/кв.м · ${fmtInt(r.marketDays)} дни на пазара</title></circle>`).join('');
+    document.getElementById('scatter').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Цена в евро на квадратен метър спрямо дни на пазара">${grid}<text class="chart-axis scatter-axis" x="${(L+W-R)/2}" y="${H-5}" text-anchor="middle">Дни на пазара</text><text class="chart-axis scatter-axis" transform="translate(16 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle">Цена (€/кв.м)</text>${points}</svg>`;
   } else document.getElementById('scatter').innerHTML='<div class="meta">Няма достатъчно данни за графиката.</div>';
 
   const allActivePpm = active.filter(r=>r.ppm != null);

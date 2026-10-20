@@ -160,6 +160,13 @@ def clean_text(text: str, limit: int | None = None) -> str:
     return text
 
 
+def parse_olx_location_date(raw: str) -> tuple[str, str]:
+    """Разделя OLX локацията от датата, без да реже имена като „м-т Акчелар“."""
+    raw = clean_text(raw)
+    parts = re.split(r"\s+[–—-]\s+", raw, maxsplit=1)
+    return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
+
+
 def strip_nav_junk(text: str) -> str:
     """Маха навигационни/категорийни етикети на сайта (напр. 'Бизнеси, Стаи,
     Услуги'), ако са се промъкнали в текста на описанието — вижда се обикновено
@@ -782,9 +789,7 @@ def scrape_olx(context) -> list[dict]:
 
                         loc_el = card.query_selector('[data-testid="location-date"]')
                         loc_raw = loc_el.inner_text().strip() if loc_el else ""
-                        parts = loc_raw.split("-")
-                        loc = parts[0].strip()
-                        date_raw = parts[-1].strip() if len(parts) > 1 else ""
+                        loc, date_raw = parse_olx_location_date(loc_raw)
 
                         img_el = card.query_selector("img[src]")
                         img = img_el.get_attribute("src") if img_el else ""
@@ -801,6 +806,16 @@ def scrape_olx(context) -> list[dict]:
 
                             detail_text = detail.inner_text("body")
                             sqm = extract_sqm(f"{title} {detail_text}")
+
+                            # Детайлната страница съдържа изписаната от OLX локация.
+                            # Предпочитаме я пред текста на картата, който често е съкратен.
+                            detail_loc_el = detail.query_selector('[data-testid="location-date"]')
+                            if detail_loc_el:
+                                detail_loc, detail_date = parse_olx_location_date(detail_loc_el.inner_text())
+                                if detail_loc:
+                                    loc = detail_loc
+                                if detail_date:
+                                    date_raw = detail_date
 
                             # Забележка: тук НЕ ползваме широк ':has-text("Описание")' селектор —
                             # той понякога захваща цялото меню/навигацията на страницата вместо
