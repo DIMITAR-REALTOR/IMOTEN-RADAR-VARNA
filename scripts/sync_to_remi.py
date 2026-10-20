@@ -214,6 +214,29 @@ def main():
 
     by_source = {source: list(properties.values()) for source, properties in by_source.items()}
 
+    max_listings_raw = os.environ.get("REMI_MAX_LISTINGS", "").strip()
+    if max_listings_raw:
+        try:
+            max_listings = int(max_listings_raw)
+        except ValueError:
+            print("ГРЕШКА: REMI_MAX_LISTINGS трябва да е цяло число от 1 до 50")
+            return 2
+        if not 1 <= max_listings <= BATCH_SIZE:
+            print("ГРЕШКА: REMI_MAX_LISTINGS трябва да е цяло число от 1 до 50")
+            return 2
+        limited = []
+        for source, props in by_source.items():
+            for prop in props:
+                if len(limited) >= max_listings:
+                    break
+                limited.append((source, prop))
+            if len(limited) >= max_listings:
+                break
+        by_source = {}
+        for source, prop in limited:
+            by_source.setdefault(source, []).append(prop)
+        print(f"Ограничен sync run: ще бъдат изпратени най-много {len(limited)} обяви.")
+
     row_count = sum(len(props) for props in by_source.values())
     if skipped_unsupported or skipped_invalid or collapsed_duplicates or sanitized_prices or sanitized_photos:
         print(
@@ -283,6 +306,10 @@ def main():
         f"Импорт завершен: вкарани {total_inserted}, актуализирани {total_updated}, "
         f"промени на цените {total_price_changes}, отхвърлени {total_rejected}"
     )
+
+    if os.environ.get("REMI_SKIP_MATCHING", "").strip().lower() in {"1", "true", "yes"}:
+        print("Съпоставянето е пропуснато по настройка на ограничен sync run.")
+        return 0
 
     try:
         sync_resp = post_json(f"{api_url}/api/v1/market/sync", {}, secret, timeout=120)
