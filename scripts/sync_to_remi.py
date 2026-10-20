@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -26,13 +27,17 @@ def parse_published_at(raw):
         return None
     text = raw.strip().lower()
     if "днес" in text:
-        return datetime.now(timezone.utc).date().isoformat()
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     m = re.search(r"(\d{1,2})\s+([а-я]+)\s+(\d{4})", text)
     if m:
         month = BG_MONTHS.get(m.group(2))
         if month:
             try:
-                return datetime(int(m.group(3)), month, int(m.group(1)), tzinfo=timezone.utc).date().isoformat()
+                return (
+                    datetime(int(m.group(3)), month, int(m.group(1)), tzinfo=timezone.utc)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z")
+                )
             except ValueError:
                 return None
     return None
@@ -125,6 +130,7 @@ def main():
     total_updated = 0
     total_price_changes = 0
     total_rejected = 0
+    failed_sources = 0
 
     for source, props in by_source.items():
         source_payload = {"batch_id": batch_id, "source": source, "properties": props}
@@ -133,6 +139,7 @@ def main():
         except requests.RequestException as err:
             print(f"ГРЕШКА при извикване на ingestion за {source}: {err}")
             total_rejected += len(props)
+            failed_sources += 1
             continue
         if resp.status_code == 401:
             print("ГРЕШКА: неуспешна автентикация към REMI ingestion")
@@ -140,6 +147,7 @@ def main():
         if resp.status_code >= 400:
             print(f"ГРЕШКА при ingestion за {source}: HTTP {resp.status_code} {resp.text[:200]}")
             total_rejected += len(props)
+            failed_sources += 1
             continue
         data = resp.json().get("data", {})
         total_inserted += data.get("inserted", 0)
@@ -165,10 +173,15 @@ def main():
             )
         else:
             print(f"Съпоставянето върна HTTP {sync_resp.status_code}: {sync_resp.text[:200]}")
+            return 4
     except requests.RequestException as err:
         print(f"ГРЕШКА при извикване на съпоставяне: {err}")
-        return 0
+        return 4
 
+    if failed_sources:
+        return 5
+    if total_rejected:
+        return 1
     return 0
 
 
