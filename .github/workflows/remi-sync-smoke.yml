@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   sync-one-current-listing:
-    if: github.event.head_commit.message == 'chore: run one-record REMI smoke import'
+    if: "${{ github.event.head_commit.message == 'chore: run one-record REMI smoke import' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
