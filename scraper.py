@@ -1503,6 +1503,14 @@ def main():
     # Левски 1 / Левски 2 / Левски → Левски)
     df["Локация"] = df["Локация"].map(normalize_location)
 
+    # Махаме обяви от Добрич — OLX от време на време връща резултати от там
+    # въпреки URL филтъра за Варна (region/location дрейф на техния search).
+    dobrich_mask = df["Локация"].fillna("").str.contains("добрич", case=False, regex=False)
+    n_dobrich = int(dobrich_mask.sum())
+    if n_dobrich:
+        print(f"\n🚫 Премахнати {n_dobrich} обяви от Добрич (извън обхвата на радара)")
+    df = df[~dobrich_mask].reset_index(drop=True)
+
     # Финален ред на колоните за CSV
     df["Локация-район"] = df["Локация"]
     df["Цена_кв.м"] = df["Цена_на_квм"]
