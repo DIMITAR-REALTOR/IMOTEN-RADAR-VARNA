@@ -84,6 +84,15 @@ def parse_published_at(raw):
     return None
 
 
+def normalize_seller_type(raw):
+    value = (raw or "").strip().lower()
+    if "част" in value or "private" in value:
+        return "private"
+    if "аген" in value or "фирм" in value or "agency" in value:
+        return "agency"
+    return "unknown"
+
+
 def row_to_property(row):
     # The scraper's published CSV keeps the canonical listing URL in "Източник";
     # "Линк" and "ID_обява" are internal columns omitted from that export.
@@ -119,6 +128,7 @@ def row_to_property(row):
     return {
         "source_listing_id": (row.get("ID_обява") or "").strip() or listing_id_from_url(link),
         "source_url": link,
+        "seller_type": normalize_seller_type(row.get("Тип_продавач")),
         "title": title,
         "description": description,
         "price_eur": price_eur,
@@ -158,7 +168,7 @@ def property_quality(prop):
     """Prefer the richer copy when a search page returns the same listing twice."""
     return (
         sum(prop.get(key) not in (None, "") for key in (
-            "price_eur", "area_sqm", "property_type", "transaction_type",
+            "price_eur", "area_sqm", "property_type", "transaction_type", "seller_type",
             "neighborhood", "photo_url", "listing_date",
         )),
         len(prop.get("description") or ""),

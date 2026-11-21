@@ -13,6 +13,7 @@ class SyncToRemiPayloadTests(unittest.TestCase):
             "Площ_квм": "60",
             "Тип_имот": "Апартамент",
             "Тип_сделка": "Продажба",
+            "Тип_продавач": "частно лице",
             "Локация-район": "Левски",
             "Снимка_URL": "https://example.com/a.jpg",
             "Дата_обява": "днес",
@@ -27,6 +28,7 @@ class SyncToRemiPayloadTests(unittest.TestCase):
         self.assertEqual(prop["area_sqm"], 60.0)
         self.assertEqual(prop["property_type"], "Апартамент")
         self.assertEqual(prop["transaction_type"], "sale")
+        self.assertEqual(prop["seller_type"], "private")
         self.assertEqual(prop["urgency"], "YES")
         self.assertTrue(prop["is_new_construction"])
         self.assertFalse(prop["is_from_investor"])
@@ -35,7 +37,7 @@ class SyncToRemiPayloadTests(unittest.TestCase):
         for legacy in (
             "external_id", "deal_type", "urgent", "new_build",
             "from_investor", "photos", "published_at",
-            "seller_type", "raw_location", "phones",
+            "raw_location", "phones",
             "price_currency_confidence",
         ):
             self.assertNotIn(legacy, prop)
