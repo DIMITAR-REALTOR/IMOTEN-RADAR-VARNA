@@ -85,6 +85,8 @@ def build_raw_and_meta(
                 link = (row.get("Източник") or "").strip()
                 if not link or link in seen_today:
                     continue
+                if "добрич" in (row.get("Локация-район") or "").strip().lower():
+                    continue
                 seen_today.add(link)
                 price = f(row.get("Цена"))
                 sqm = f(row.get("Площ_квм"))
