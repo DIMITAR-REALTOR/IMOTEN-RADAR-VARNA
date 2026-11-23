@@ -21,6 +21,10 @@ import json
 import os
 import re
 from datetime import date
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scraper_safety import atomic_write_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HIST_DIR = os.path.join(ROOT, "data", "history")
@@ -115,6 +119,8 @@ def build_raw_and_meta(
                         "fromInvestor": (row.get("От_инвеститор") or "").strip().upper() == "YES",
                         "seller": (row.get("Тип_продавач") or "").strip() or None,
                         "photo": (row.get("Снимка_URL") or "").strip() or None,
+                        "uncertain": (row.get("Неопределено") or "").strip().upper() == "YES",
+                        "classification": (row.get("Тип_имот") or "").strip(),
                         "firstSeen": fdate,
                         "lastSeen": fdate,
                         "timesSeen": 1,
@@ -145,6 +151,8 @@ def build_raw_and_meta(
                     rec["fromInvestor"] = (row.get("От_инвеститор") or "").strip().upper() == "YES"
                     rec["seller"] = (row.get("Тип_продавач") or "").strip() or rec["seller"]
                     rec["photo"] = (row.get("Снимка_URL") or "").strip() or rec["photo"]
+                    rec["uncertain"] = (row.get("Неопределено") or "").strip().upper() == "YES"
+                    rec["classification"] = tip
                 if fdate[:7] in trend_months and ppm is not None:
                     rec["monthly"][fdate[:7]] = {"month": fdate[:7], "ppm": ppm}
                 listings[link] = rec
@@ -240,8 +248,7 @@ def main():
         .replace("__META_DATA_JSON__", meta_json, 1)
     )
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as fh:
-        fh.write(html)
+    atomic_write_text(OUT_PATH, html)
     size_mb = os.path.getsize(OUT_PATH) / 1e6
     print(
         f"Радар генериран: {OUT_PATH} ({size_mb:.1f} MB, {kept}/{total} обяви, "

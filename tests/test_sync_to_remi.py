@@ -1,6 +1,15 @@
+import csv
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
-from scripts.sync_to_remi import row_to_property, source_from_url
+from scripts.sync_to_remi import (
+    is_existing_url_duplicate,
+    main,
+    row_to_property,
+    source_from_url,
+)
 
 
 class SyncToRemiPayloadTests(unittest.TestCase):
@@ -54,6 +63,99 @@ class SyncToRemiPayloadTests(unittest.TestCase):
         self.assertEqual(source_from_url("https://www.alo.bg/x"), "alo_bg")
         self.assertEqual(source_from_url("https://olx.bg/x"), "olx_bg")
         self.assertEqual(source_from_url("https://example.com/x"), "imot_bg")
+
+    def test_known_existing_url_conflict_is_idempotent(self):
+        row = {
+            "source_listing_id": "IDa5b6w",
+            "reason": (
+                'duplicate key value violates unique constraint '
+                '"market_listings_raw_url_key" — 23505'
+            ),
+        }
+        self.assertTrue(is_existing_url_duplicate(row))
+
+    def test_other_ingestion_rejections_remain_errors(self):
+        row = {
+            "source_listing_id": "IDa5b6w",
+            "reason": 'duplicate key value violates unique constraint "other_key" — 23505',
+        }
+        self.assertFalse(is_existing_url_duplicate(row))
+        self.assertFalse(is_existing_url_duplicate({"reason": "invalid payload"}))
+
+    def test_known_existing_url_conflict_allows_sync_to_finish(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "listings.csv")
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Източник", "Описание"])
+                writer.writeheader()
+                writer.writerow({"Източник": "https://www.olx.bg/ad/IDa5b6w.html",
+                                 "Описание": "Апартамент"})
+
+            class Response:
+                status_code = 200
+                text = ""
+
+                def __init__(self, data):
+                    self.data = data
+
+                def json(self):
+                    return {"data": self.data}
+
+            responses = [
+                Response({
+                    "received": 1,
+                    "inserted": 0,
+                    "updated": 0,
+                    "price_changes": 0,
+                    "rejected": 1,
+                    "rejected_rows": [{
+                        "reason": ('duplicate key value violates unique constraint '
+                                   '"market_listings_raw_url_key" — 23505')
+                    }],
+                }),
+                Response({"clients_processed": 0, "proposals_created": 0,
+                          "notifications_skipped": 0}),
+            ]
+            with patch.dict(os.environ, {
+                "REMI_API_URL": "https://remi.invalid",
+                "REMI_INGESTION_SECRET": "test-secret",
+                "REMI_CSV_PATH": path,
+                "REMI_SKIP_MATCHING": "0",
+            }), patch("scripts.sync_to_remi.post_json",
+                     side_effect=responses) as post_json:
+                self.assertEqual(main(), 0)
+                self.assertEqual(post_json.call_count, 2)
+
+    def test_other_rejection_does_not_call_matching(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "listings.csv")
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Източник", "Описание"])
+                writer.writeheader()
+                writer.writerow({"Източник": "https://www.olx.bg/ad/IDa5b6w.html",
+                                 "Описание": "Апартамент"})
+
+            class Response:
+                status_code = 200
+                text = ""
+
+                def json(self):
+                    return {"data": {
+                        "received": 1,
+                        "inserted": 0,
+                        "updated": 0,
+                        "price_changes": 0,
+                        "rejected": 1,
+                        "rejected_rows": [{"reason": "invalid payload"}],
+                    }}
+
+            with patch.dict(os.environ, {
+                "REMI_API_URL": "https://remi.invalid",
+                "REMI_INGESTION_SECRET": "test-secret",
+                "REMI_CSV_PATH": path,
+            }), patch("scripts.sync_to_remi.post_json", return_value=Response()) as post_json:
+                self.assertEqual(main(), 5)
+                self.assertEqual(post_json.call_count, 1)
 
 
 if __name__ == "__main__":

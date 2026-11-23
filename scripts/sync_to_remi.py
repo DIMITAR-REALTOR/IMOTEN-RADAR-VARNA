@@ -176,6 +176,18 @@ def property_quality(prop):
     )
 
 
+def is_existing_url_duplicate(rejected_row):
+    """Return True only for the known idempotent raw-URL unique conflict."""
+    if not isinstance(rejected_row, dict):
+        return False
+    reason = str(rejected_row.get("reason") or rejected_row.get("error") or "").lower()
+    return (
+        "23505" in reason
+        and "market_listings_raw_url_key" in reason
+        and "duplicate key" in reason
+    )
+
+
 def main():
     api_url = os.environ.get("REMI_API_URL", "").rstrip("/")
     secret = os.environ.get("REMI_INGESTION_SECRET", "")
@@ -265,6 +277,7 @@ def main():
     total_updated = 0
     total_price_changes = 0
     total_rejected = 0
+    total_existing_url_duplicates = 0
 
     for source, props in by_source.items():
         source_batches = list(chunks(props))
@@ -305,8 +318,21 @@ def main():
             if data.get("rejected_rows"):
                 print(f"Отхвърлени редове ({source}): {data['rejected_rows']}")
             if data.get("rejected", 0):
-                print("Съпоставянето няма да бъде стартирано заради отхвърлени обяви.")
-                return 5
+                rejected_count = int(data.get("rejected", 0))
+                rejected_rows = data.get("rejected_rows")
+                if (
+                    isinstance(rejected_rows, list)
+                    and len(rejected_rows) == rejected_count
+                    and all(is_existing_url_duplicate(row) for row in rejected_rows)
+                ):
+                    total_existing_url_duplicates += rejected_count
+                    print(
+                        f"{rejected_count} обяви вече съществуват в REMI по URL; "
+                        "продължавам със съпоставянето."
+                    )
+                else:
+                    print("Съпоставянето няма да бъде стартирано заради отхвърлени обяви.")
+                    return 5
 
     if skipped_invalid:
         print("Съпоставянето няма да бъде стартирано заради обяви с невалидни URL/ID.")
@@ -314,7 +340,8 @@ def main():
 
     print(
         f"Импорт завершен: вкарани {total_inserted}, актуализирани {total_updated}, "
-        f"промени на цените {total_price_changes}, отхвърлени {total_rejected}"
+        f"промени на цените {total_price_changes}, отхвърлени {total_rejected}, "
+        f"вече съществуващи URL дубликати {total_existing_url_duplicates}"
     )
 
     if os.environ.get("REMI_SKIP_MATCHING", "").strip().lower() in {"1", "true", "yes"}:
@@ -337,8 +364,6 @@ def main():
         print(f"ГРЕШКА при извикване на съпоставяне: {err}")
         return 4
 
-    if total_rejected:
-        return 5
     if skipped_invalid:
         return 5
     if skipped_unsupported:

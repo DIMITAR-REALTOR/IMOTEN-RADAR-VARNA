@@ -1,5 +1,9 @@
 name: Scraper - Всеки ден
 
+concurrency:
+  group: imoten-radar-daily-scrape
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: '0 9 * * *'
@@ -32,12 +36,12 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run scraper
-        timeout-minutes: 180
+        timeout-minutes: 300
         env:
           MAX_PAGES: 20
           MAX_ALO_PAGES: 20
-          MAX_IMOT_PAGES: 20
-          MAX_OLX_PAGES: 20
+          MAX_IMOT_PAGES: 40
+          MAX_OLX_PAGES: 40
           SCRAPE_ALO: "1"
           SCRAPE_IMOT: "1"
           SCRAPE_OLX: "1"
@@ -45,17 +49,22 @@ jobs:
           IMOT_EMAIL: ${{ secrets.IMOT_EMAIL }}
           IMOT_PASSWORD: ${{ secrets.IMOT_PASSWORD }}
           PYTHONUNBUFFERED: "1"
+          DROP_THRESHOLD_PERCENT: "30"
+          MIN_LISTINGS: "50"
+          PHOTO_RETENTION_DAYS: "14"
         run: python -u scraper.py
 
       - name: Генериране на радар (docs/index.html)
+        if: success()
         run: python -u scripts/build_radar.py
 
-      - name: Upload scraper debug
+      - name: Upload scraper diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scraper-debug
+          name: scraper-diagnostics
           path: |
+            data/scrape_report.json
             data/olx_login_debug.png
             data/olx_login_debug.html
             data/alo_*_debug.png
@@ -63,13 +72,20 @@ jobs:
             data/imot_*_debug.png
             data/imot_*_debug.html
           if-no-files-found: ignore
+          retention-days: 14
 
       - name: Save CSV to repo
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@github.com"
-          git add data/properties_varna.csv data/history/ data/photos/ docs/ 2>/dev/null || true
-          git diff --cached --quiet || (git commit -m "📊 Обяви $(date +'%d.%m.%Y')" && git push)
+          git add data/properties_varna.csv data/history/ data/photos/ docs/ data/manual_property_corrections.csv data/last_full_snapshot.json
+          if git diff --cached --quiet; then
+            echo "Няма промени за публикуване"
+          else
+            git commit -m "📊 Обяви $(date +'%d.%m.%Y')"
+            git push
+          fi
 
       - name: Съдържане на обявите в REMI AI
         if: success()

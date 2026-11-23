@@ -16,6 +16,25 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
+from scraper_safety import (
+    FINAL_COLUMNS,
+    apply_manual_corrections,
+    atomic_write_csv,
+    build_report,
+    classify_unknown,
+    cleanup_expired_photos,
+    mark_full_snapshot,
+    record_listing,
+    record_page,
+    record_pass_start,
+    record_pass_stop,
+    record_parse_error,
+    record_timeout,
+    stable_listing_id,
+    update_site,
+    validate_snapshot,
+    write_diagnostics,
+)
 
 # ── Настройки ───────────────────────────────────────────────────
 OLX_EMAIL    = os.environ.get("OLX_EMAIL", "")
@@ -642,7 +661,7 @@ OLX_DEAL_PASSES = [
 ]
 
 
-def scrape_olx(context) -> list[dict]:
+def scrape_olx(context, report=None) -> list[dict]:
     rows = []
     page = context.new_page()
     olx_logged_in = False
@@ -743,6 +762,9 @@ def scrape_olx(context) -> list[dict]:
         if MAX_OLX_PAGES < 1:
             continue
         for private_business_qs, seller_label in SELLER_PASSES:
+            pass_name = f"{deal_label}/{seller_label}"
+            if report is not None:
+                record_pass_start(report, "olx.bg", pass_name)
             base_url = (
                 f"https://www.olx.bg/nedvizhimi-imoti/{deal_path}/varna/"
                 f"?currency=EUR&search%5Bprivate_business%5D={private_business_qs}"
@@ -762,10 +784,18 @@ def scrape_olx(context) -> list[dict]:
                     rand_sleep(1, 2)
                 except PwTimeout:
                     print("  OLX: timeout")
+                    if report is not None:
+                        record_timeout(report, "olx.bg", pass_name, "timeout при зареждане на страница")
                     break
 
                 cards = page.query_selector_all('[data-cy="l-card"]')
+                if report is not None:
+                    record_page(report, "olx.bg", pass_name, current_page,
+                                MAX_OLX_PAGES, bool(cards))
                 if not cards:
+                    if report is not None:
+                        record_pass_stop(report, "olx.bg", pass_name,
+                                         "празна първа страница" if current_page == 1 else "край на резултатите")
                     # Спираме само когато страницата реално няма карти — не
                     # разчитаме на бутона "напред" (виж бележката за imot.bg
                     # по-долу: понякога липсва в отговора към бота дори когато
@@ -777,6 +807,8 @@ def scrape_olx(context) -> list[dict]:
                         link_el = card.query_selector('a[href*="/d/"]')
                         link = link_el.get_attribute("href") if link_el else ""
                         if not link:
+                            if report is not None:
+                                record_parse_error(report, "olx.bg", pass_name)
                             continue
                         if not link.startswith("http"):
                             link = "https://www.olx.bg" + link
@@ -853,11 +885,19 @@ def scrape_olx(context) -> list[dict]:
                             "Ново_строителство": "YES" if is_new_build(desc_full) else "",
                             "От_инвеститор": "YES" if is_from_investor(desc_full) else "",
                         })
+                        if report is not None:
+                            record_listing(report, "olx.bg", pass_name)
                     except Exception as e:
                         print(f"  OLX card грешка: {e}")
+                        if report is not None:
+                            record_parse_error(report, "olx.bg", pass_name)
 
                 # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
                 # — не разчитаме на пагинационния бутон "напред".
+                if current_page >= MAX_OLX_PAGES:
+                    if report is not None:
+                        record_pass_stop(report, "olx.bg", pass_name, "page_limit_with_results")
+                    break
                 current_page += 1
                 rand_sleep(2, 3)
 
@@ -898,7 +938,7 @@ ALO_DEAL_PASSES = [
 ALO_VARNA_QS = "region_id=3&location_ids=554"
 
 
-def scrape_alo(context) -> list[dict]:
+def scrape_alo(context, report=None) -> list[dict]:
     """Сайтът смени изцяло структурата си (стар URL /obiavi/nedvizhimi-imoti/varna/
     вече връща 404). Ново: отделна категория на тип имот + филтър по регион/град
     чрез query параметри region_id/location_ids (Варна = 3/554). Няма вече вграден
@@ -908,6 +948,9 @@ def scrape_alo(context) -> list[dict]:
 
     for deal_path, deal_label, categories in ALO_DEAL_PASSES:
         for category in categories:
+            pass_name = f"{deal_label}/{category}"
+            if report is not None:
+                record_pass_start(report, "alo.bg", pass_name)
             base_url = f"https://www.alo.bg/obiavi/{deal_path}/{category}/?{ALO_VARNA_QS}"
             current_page = 1
             while current_page <= MAX_ALO_PAGES:
@@ -919,12 +962,20 @@ def scrape_alo(context) -> list[dict]:
                     rand_sleep(1, 2)
                 except PwTimeout:
                     print("  ALO: timeout")
+                    if report is not None:
+                        record_timeout(report, "alo.bg", pass_name, "timeout при зареждане на страница")
                     break
 
                 cards = page.query_selector_all(".listtop-item")
+                if report is not None:
+                    record_page(report, "alo.bg", pass_name, current_page,
+                                MAX_ALO_PAGES, bool(cards))
                 if not cards:
                     if current_page == 1:
                         print(f"  ALO/{deal_label}/{category}: няма обяви за Варна")
+                    if report is not None:
+                        record_pass_stop(report, "alo.bg", pass_name,
+                                         "празна категория" if current_page == 1 else "край на резултатите")
                     break
 
                 for card in cards:
@@ -932,6 +983,8 @@ def scrape_alo(context) -> list[dict]:
                         link_el = card.query_selector("a[href]")
                         link = link_el.get_attribute("href") if link_el else ""
                         if not link:
+                            if report is not None:
+                                record_parse_error(report, "alo.bg", pass_name)
                             continue
                         if not link.startswith("http"):
                             link = "https://www.alo.bg" + link
@@ -1019,9 +1072,17 @@ def scrape_alo(context) -> list[dict]:
                             "Ново_строителство": "YES" if is_new_build(desc_full) else "",
                             "От_инвеститор": "YES" if is_from_investor(desc_full, publisher) else "",
                         })
+                        if report is not None:
+                            record_listing(report, "alo.bg", pass_name)
                     except Exception as e:
                         print(f"  ALO card грешка: {e}")
+                        if report is not None:
+                            record_parse_error(report, "alo.bg", pass_name)
 
+                if current_page >= MAX_ALO_PAGES:
+                    if report is not None:
+                        record_pass_stop(report, "alo.bg", pass_name, "page_limit_with_results")
+                    break
                 current_page += 1
                 rand_sleep(2, 3)
 
@@ -1051,7 +1112,8 @@ IMOT_AGKIND_PASSES = [
 
 
 def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label: str,
-                        seller_override: str | None = None, investor_override: bool | None = None) -> list[dict]:
+                        seller_override: str | None = None, investor_override: bool | None = None,
+                        report=None) -> list[dict]:
     """Обхожда страниците на едно търсене в imot.bg (един URL + пагинация) и
     връща списък от редове. Изведена е отделно, защото я викаме по няколко
     пъти с различни URL-и — веднъж без филтър (общо търсене) и, ако сме
@@ -1064,6 +1126,8 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
     """
     rows = []
     current_page = 1
+    if report is not None:
+        record_pass_start(report, "imot.bg", pass_label)
     while current_page <= MAX_IMOT_PAGES:
         if current_page == 1:
             url = base_url
@@ -1090,11 +1154,20 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
                 rand_sleep(1, 2)
             except PwTimeout:
                 print("  imot.bg: timeout пак — прескачам")
+                if report is not None:
+                    record_timeout(report, "imot.bg", pass_label,
+                                   "два последователни timeout-а при зареждане")
                 break
 
         cards = page.query_selector_all(".ads2023 > div.item")
+        if report is not None:
+            record_page(report, "imot.bg", pass_label, current_page,
+                        MAX_IMOT_PAGES, bool(cards))
         if not cards:
             print("  imot.bg: няма повече")
+            if report is not None:
+                record_pass_stop(report, "imot.bg", pass_label,
+                                 "празна първа страница" if current_page == 1 else "край на резултатите")
             save_debug_page(page, f"imot_page_{current_page}_debug")
             break
 
@@ -1108,6 +1181,8 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
 
                 title_el = card.query_selector(".zaglavie a.title")
                 if not title_el:
+                    if report is not None:
+                        record_parse_error(report, "imot.bg", pass_label)
                     continue
 
                 link = title_el.get_attribute("href") or ""
@@ -1215,8 +1290,12 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
                     "От_инвеститор": "YES" if is_investor else "",
                 })
                 page_count += 1
+                if report is not None:
+                    record_listing(report, "imot.bg", pass_label)
             except Exception as e:
                 print(f"  imot.bg card грешка: {e}")
+                if report is not None:
+                    record_parse_error(report, "imot.bg", pass_label)
 
         print(f"  imot.bg/{pass_label}: {page_count} обяви на стр.{current_page}")
 
@@ -1224,13 +1303,17 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
         # Преди тук проверявахме и линка "Напред" (a.next) и спирахме ако липсва,
         # но той понякога не се появява в отговора към бота дори когато следващата
         # страница реално има резултати — затова вече не разчитаме на него.
+        if current_page >= MAX_IMOT_PAGES:
+            if report is not None:
+                record_pass_stop(report, "imot.bg", pass_label, "page_limit_with_results")
+            break
         current_page += 1
         rand_sleep(2, 4)
 
     return rows
 
 
-def scrape_imot(context) -> list[dict]:
+def scrape_imot(context, report=None) -> list[dict]:
     """Обхожда списъка с обяви (без да отваря всяка обява поотделно)."""
     rows = []
     page = context.new_page()
@@ -1260,11 +1343,13 @@ def scrape_imot(context) -> list[dict]:
                 rows += _scrape_imot_pages(
                     page, context, agkind_url, deal_label, pass_label,
                     seller_override=seller_label, investor_override=is_investor,
+                    report=report,
                 )
 
         # Общо търсене без филтър — покрива и всичко извън fe_agkinds
         # категориите по-горе (обикновени агенции), и изцяло наемите.
-        rows += _scrape_imot_pages(page, context, base_url, deal_label, deal_label)
+        rows += _scrape_imot_pages(page, context, base_url, deal_label, deal_label,
+                                   report=report)
 
     page.close()
     print(f"  imot.bg: {len(rows)} обяви общо")
@@ -1369,6 +1454,11 @@ def download_cover_photos(df: "pd.DataFrame"):
 
 def main():
     all_rows = []
+    scrape_report = build_report({
+        "olx.bg": SCRAPE_OLX,
+        "alo.bg": SCRAPE_ALO,
+        "imot.bg": SCRAPE_IMOT,
+    })
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -1394,32 +1484,50 @@ def main():
         if SCRAPE_ALO:
             print("\n=== ALO.bg ===")
             try:
-                all_rows += scrape_alo(context)
+                rows = scrape_alo(context, scrape_report)
+                all_rows += rows
+                update_site(scrape_report, "alo.bg", "успешен",
+                            listings=len(rows))
             except Exception as e:
-                print(f"ALO ГРЕШКА: {e}")
+                print(f"ALO ГРЕШКА: {type(e).__name__}")
+                update_site(scrape_report, "alo.bg", "грешка",
+                            reason=type(e).__name__)
         else:
             print("\n=== ALO.bg ===")
             print("  ALO: пропуснато чрез SCRAPE_ALO=0")
+            update_site(scrape_report, "alo.bg", "изключен")
 
         if SCRAPE_IMOT:
             print("\n=== imot.bg ===")
             try:
-                all_rows += scrape_imot(context)
+                rows = scrape_imot(context, scrape_report)
+                all_rows += rows
+                update_site(scrape_report, "imot.bg", "успешен",
+                            listings=len(rows))
             except Exception as e:
-                print(f"imot.bg ГРЕШКА: {e}")
+                print(f"imot.bg ГРЕШКА: {type(e).__name__}")
+                update_site(scrape_report, "imot.bg", "грешка",
+                            reason=type(e).__name__)
         else:
             print("\n=== imot.bg ===")
             print("  imot.bg: пропуснато чрез SCRAPE_IMOT=0")
+            update_site(scrape_report, "imot.bg", "изключен")
 
         if SCRAPE_OLX:
             print("\n=== OLX.bg ===")
             try:
-                all_rows += scrape_olx(context)
+                rows = scrape_olx(context, scrape_report)
+                all_rows += rows
+                update_site(scrape_report, "olx.bg", "успешен",
+                            listings=len(rows))
             except Exception as e:
-                print(f"OLX ГРЕШКА: {e}")
+                print(f"OLX ГРЕШКА: {type(e).__name__}")
+                update_site(scrape_report, "olx.bg", "грешка",
+                            reason=type(e).__name__)
         else:
             print("\n=== OLX.bg ===")
             print("  OLX: пропуснато чрез SCRAPE_OLX=0")
+            update_site(scrape_report, "olx.bg", "изключен")
 
         browser.close()
 
@@ -1432,11 +1540,7 @@ def main():
     df = pd.DataFrame(all_rows, columns=COLS)
 
     if df.empty:
-        final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                      "Описание","Източник","Снимка_URL","Снимка_локална","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
-        pd.DataFrame(columns=final_cols).to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
-        print(f"\n⚠️ Няма намерени обяви → {OUTPUT_FILE}")
-        return
+        df = pd.DataFrame(columns=COLS)
 
     # Приоритет на извора при дедупликация между сайтове — печели по-надеждният
     # маркер за "Тип_продавач": OLX (филтър на ниво URL) > imot.bg (маркер
@@ -1515,18 +1619,86 @@ def main():
     df["Локация-район"] = df["Локация"]
     df["Цена_кв.м"] = df["Цена_на_квм"]
     df["Описание"] = df["Описание"].fillna("").map(lambda x: clean_text(strip_nav_junk(str(x)), 800))
+    # Use the same URL-derived key for current output, old history rows (which
+    # have no ID_обява column), and photo retention. Site-local numeric IDs are
+    # not globally unique and would break the retention join across snapshots.
+    df["ID_обява"] = df.apply(stable_listing_id, axis=1)
+    df["Неопределено"] = df["Тип_имот"].apply(
+        lambda value: "YES" if classify_unknown({"Тип_имот": value}) else ""
+    )
+    df["Класификация_сигурна"] = df["Неопределено"].apply(
+        lambda value: "" if value == "YES" else "YES"
+    )
+    df["Снимка_локална"] = ""
+
+    corrections_path = os.environ.get(
+        "MANUAL_CORRECTIONS_FILE",
+        "data/manual_property_corrections.csv",
+    )
+    df = apply_manual_corrections(df, corrections_path)
+    df["Неопределено"] = df.apply(
+        lambda row: "" if str(row.get("Класификация_сигурна") or "") == "YES"
+        and str(row.get("Тип_имот") or "").strip().lower() not in {"друго", "неопределено", ""}
+        else "YES",
+        axis=1,
+    )
+
+    enabled_sites = {
+        "olx.bg": SCRAPE_OLX,
+        "alo.bg": SCRAPE_ALO,
+        "imot.bg": SCRAPE_IMOT,
+    }
+    for site, enabled in enabled_sites.items():
+        if not enabled:
+            continue
+        entry = scrape_report["sites"][site]
+        if entry["status"] == "успешен" and entry["listings"] == 0:
+            update_site(scrape_report, site, "потвърдено празен",
+                        listings=0)
+
+    print("\n=== Обобщение по сайт и търсене ===")
+    for site, entry in scrape_report["sites"].items():
+        print(f"{site}: {entry['status']}; {entry['listings']} обяви, "
+              f"{entry['pages']} страници")
+        for pass_name, pass_entry in entry.get("passes", {}).items():
+            print(f"  {pass_name}: {pass_entry['listings']} обяви, "
+                  f"{pass_entry['pages']} стр., "
+                  f"спиране={pass_entry.get('stop_reason', 'неизвестно')}, "
+                  f"време={pass_entry.get('duration_seconds', 0):.2f}s")
+
+    validation_errors = validate_snapshot(
+        df,
+        scrape_report,
+        enabled_sites,
+    )
+    write_diagnostics(scrape_report, validation_errors)
+    if validation_errors:
+        for error in validation_errors:
+            print(f"\n❌ ВАЛИДАЦИЯ: {error}")
+        print("\nПубликуването е отказано; предишните CSV, history и docs са запазени.")
+        sys.exit(2)
+
     df["Снимка_локална"] = download_cover_photos(df)
 
-    final_cols = ["Тип_имот","Тип_продавач","Тип_сделка","Локация-район","Площ_квм","Цена","Цена_кв.м","Телефон",
-                  "Описание","Източник","Снимка_URL","Снимка_локална","Дата_обява","Спешност","Ново_строителство","От_инвеститор"]
-    df = df[final_cols]
+    final_cols = FINAL_COLUMNS
+    df = df[[column for column in final_cols if column in df.columns]]
+    atomic_write_csv(df, OUTPUT_FILE)
 
-    df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
-
-    # Отделен датиран файл в data/history/ — пази история от run до run,
-    # вместо всеки следващ scrape да трие предишния (OUTPUT_FILE се презаписва всеки път).
     history_file = f"{HISTORY_DIR}/properties_varna_{date.today().isoformat()}.csv"
-    df.to_csv(history_file, index=False, encoding="utf-8-sig")
+    atomic_write_csv(df, history_file)
+    mark_full_snapshot("data/last_full_snapshot.json", df)
+    photo_stats = cleanup_expired_photos(
+        df,
+        photos_dir=PHOTOS_DIR,
+        history_dir=HISTORY_DIR,
+        full_snapshot=True,
+        report_errors=[],
+    )
+    print(
+        f"\n🖼️ Снимки — запазени: {photo_stats['saved']}, "
+        f"изтрити: {photo_stats['deleted']}"
+        + (f", бележка: {photo_stats['skipped']}" if photo_stats["skipped"] else "")
+    )
 
     print(
         f"\n✅ ГОТОВО — {len(df)} обяви → {OUTPUT_FILE} и {history_file}"

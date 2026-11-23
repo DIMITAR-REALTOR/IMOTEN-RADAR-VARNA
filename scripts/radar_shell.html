@@ -337,6 +337,7 @@
       <button data-v="all" class="active">Всички</button>
       <button data-v="active">Само активни сега</button>
       <button data-v="drop">Само с намалена цена</button>
+      <button data-v="uncertain">За уточняване</button>
     </div>
     <div class="chip-toggle" id="f-seller">
       <button data-v="all" class="active">Всички</button>
@@ -898,6 +899,7 @@ function renderPool(){
 function matchesCurrentFilters(r, ignoreSeller = false){
     if (state.status === 'active' && !r.active) return false;
     if (state.status === 'drop' && !(r.drop && r.drop.from > 1000 && r.drop.pct <= -3)) return false;
+    if (state.status === 'uncertain' && !r.uncertain) return false;
     if (state.focus !== 'all' && !matchesFocus(r)) return false;
     if (state.invest === 'yes' && !r.fromInvestor) return false;
     if (state.src !== 'all' && r.src !== state.src) return false;
@@ -1190,7 +1192,7 @@ function restoreUrlState(){
   const params=new URLSearchParams(location.search);
   if (Object.prototype.hasOwnProperty.call(POOLS,params.get('pool'))) state.pool=params.get('pool');
   if (['апартамент','business','all'].includes(params.get('focus'))) state.focus=params.get('focus');
-  if (['all','active','drop'].includes(params.get('status'))) state.status=params.get('status');
+  if (['all','active','drop','uncertain'].includes(params.get('status'))) state.status=params.get('status');
   if (['all','private','agency','unknown'].includes(params.get('seller'))) state.seller=params.get('seller');
   if (['all','yes'].includes(params.get('invest'))) state.invest=params.get('invest');
   if (['all','yes'].includes(params.get('phone'))) state.phone=params.get('phone');
@@ -1291,7 +1293,10 @@ function buildPdfExportEl(){
 
   const filterBits = [POOLS[state.pool].label];
   if (state.focus !== 'all') filterBits.push(state.focus === 'апартамент' ? 'апартаменти' : 'бизнес имоти');
-  if (state.status !== 'all') filterBits.push(state.status === 'active' ? 'само активни' : 'само с намалена цена');
+  if (state.status !== 'all') filterBits.push(
+    state.status === 'active' ? 'само активни' :
+    state.status === 'uncertain' ? 'за уточняване' : 'само с намалена цена'
+  );
   if (state.invest === 'yes') filterBits.push('от инвеститор');
   if (state.newOnly) filterBits.push('нови през последните 7 дни');
   if (state.src !== 'all') filterBits.push(state.src);
