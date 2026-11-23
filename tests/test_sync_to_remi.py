@@ -157,6 +157,56 @@ class SyncToRemiPayloadTests(unittest.TestCase):
                 self.assertEqual(main(), 5)
                 self.assertEqual(post_json.call_count, 1)
 
+    def test_http_413_splits_batch_and_retries_without_losing_rows(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "listings.csv")
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Източник", "Описание"])
+                writer.writeheader()
+                for number in range(3):
+                    writer.writerow({
+                        "Източник": f"https://www.imot.bg/obiava-{number}",
+                        "Описание": f"Обява {number}",
+                    })
+
+            class Response:
+                def __init__(self, status_code, data=None, text=""):
+                    self.status_code = status_code
+                    self.data = data or {}
+                    self.text = text
+
+                def json(self):
+                    return {"data": self.data}
+
+            def imported(count):
+                return Response(200, {
+                    "received": count,
+                    "inserted": count,
+                    "updated": 0,
+                    "price_changes": 0,
+                    "rejected": 0,
+                })
+
+            responses = [
+                Response(413, text="FUNCTION_PAYLOAD_TOO_LARGE"),
+                imported(1),
+                imported(2),
+                Response(200, {"clients_processed": 0, "proposals_created": 0,
+                               "notifications_skipped": 0}),
+            ]
+            with patch.dict(os.environ, {
+                "REMI_API_URL": "https://remi.invalid",
+                "REMI_INGESTION_SECRET": "test-secret",
+                "REMI_CSV_PATH": path,
+                "REMI_SKIP_MATCHING": "0",
+            }), patch("scripts.sync_to_remi.post_json",
+                     side_effect=responses) as post_json:
+                self.assertEqual(main(), 0)
+                self.assertEqual(post_json.call_count, 4)
+                sent_counts = [len(call.args[1]["properties"])
+                               for call in post_json.call_args_list[:3]]
+                self.assertEqual(sent_counts, [3, 1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()
