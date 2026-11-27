@@ -271,7 +271,8 @@ def main():
         print("Няма валидни обяви за импорт; съпоставянето няма да бъде стартирано.")
         return 5
 
-    batch_id = f"scraper-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    batch_started_at = datetime.now(timezone.utc)
+    batch_id = f"scraper-{batch_started_at.strftime('%Y%m%d-%H%M%S')}"
 
     total_inserted = 0
     total_updated = 0
@@ -371,12 +372,30 @@ def main():
         return 0
 
     try:
-        sync_resp = post_json(f"{api_url}/api/v1/market/sync", {}, secret, timeout=120)
+        expected_sources = set(SOURCE_BY_HOST.values())
+        observed_sources = set(by_source)
+        complete_snapshot = (
+            not bool(max_listings_raw)
+            and not skipped_unsupported
+            and observed_sources == expected_sources
+        )
+        if not complete_snapshot:
+            print(
+                "Непълен snapshot: няма да маркирам обяви като неактивни "
+                f"(източници: {', '.join(sorted(observed_sources)) or 'няма'})."
+            )
+        sync_payload = {
+            "complete_snapshot": complete_snapshot,
+            "snapshot_started_at": batch_started_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "snapshot_sources": sorted(observed_sources),
+        }
+        sync_resp = post_json(f"{api_url}/api/v1/market/sync", sync_payload, secret, timeout=120)
         if sync_resp.status_code == 200:
             sync_data = sync_resp.json().get("data", {})
             print(
                 f"Съпоставяне стартирано: клиенти {sync_data.get('clients_processed')}, "
                 f"предложения {sync_data.get('proposals_created')}, "
+                f"неактивни обяви {sync_data.get('inactive_listings', 0)}, "
                 f"пропуснати {sync_data.get('notifications_skipped')}"
             )
         else:
