@@ -259,6 +259,62 @@ def normalize_location(loc: str) -> str:
     return loc or "Варна"
 
 
+# Допустими са кварталите/местностите на Варна и близките курортни зони.
+# Не приемаме произволно всяко населено място, което OLX върне под URL /varna/.
+VARNA_CITY_AREAS = {
+    "варна", "център", "бриз", "виница", "левски", "владислав варненчик",
+    "владиславово", "аспарухово", "трошево", "възраждане 1", "възраждане 2",
+    "възраждане 3", "възраждане 4", "кайсиева градина", "колхозен пазар",
+    "гръцка махала", "лятно кино тракия", "зимно кино тракия", "младост 1",
+    "младост 2", "чайка", "цветен квартал", "галата", "западна промишлена зона",
+    "северна промишлена зона", "погреби", "победа", "автогара", "базар левски",
+    "чаталджа", "окръжна болница", "окръжна болница-генерали", "изгрев",
+    "спортна зала", "фестивален комплекс", "генералите", "максуда",
+    "военна болница", "терапевтична болница", "тракия - лятно кино",
+    "тракия - зимно кино", "гръцки квартал", "погребите", "стадион спартак",
+    "островна промишлена зона", "винс-червен площад", "винс", "христо ботев", "гранд мол",
+    "гранд мол варна", "централна поща", "конфуто", "операта", "хеи",
+    "общината", "жп гара", "нептун", "червен площад", "морска градина",
+    "бизнес хотел", "планова промишлена зона", "завод дружба", "електрон",
+    "електроразпр.", "електроразпр. варна", "бизнес парк", "летище", "метро",
+}
+
+VARNA_NEARBY_LOCALITIES = {
+    "акчелар", "пчелина", "зеленика", "сотира", "салтанат", "кокарджа",
+    "сълзица", "добрева чешма",
+    "боклук тарла", "ментешето", "перчемлията", "планова", "фичоза",
+    "крушките", "ракитника", "прибой", "манастирски рид",
+    "балам дере", "франга дере", "лазур", "кантара", "кочмар", "атанас тарла",
+    "траката", "горна трака", "долна трака", "евксиноград", "св. никола",
+    "свети никола", "боровец", "боровец - юг", "боровец - север", "ален мак",
+}
+
+VARNA_RESORTS = {
+    "к.к. чайка", "к.к. златни пясъци", "златни пясъци", "к.к. слънчев ден",
+    "к.к. св.св. константин и елена", "к.к. св. св. константин и елена",
+    "св. св. константин и елена", "св.св. константин и елена",
+}
+
+
+def is_in_varna_radar_scope(location: str) -> bool:
+    """True only for Varna city neighborhoods and the explicitly included resorts."""
+    normalized = normalize_location(location or "")
+    normalized = re.sub(
+        r"(?:,\s*|\s+)(?:гр\.?\s*)?варна\s*$", "", normalized, flags=re.I
+    )
+    normalized = re.sub(r"\s+", " ", normalized).strip().casefold()
+    if normalized in VARNA_CITY_AREAS or normalized in VARNA_RESORTS:
+        return True
+
+    locality = re.sub(
+        r"^(?:м\s*-\s*т\.?\s*|м\.\s*т\.\s*|м\.\s*т\s+|м\.\s*|м\s+т\.?\s*)",
+        "",
+        normalized,
+        flags=re.I,
+    ).strip()
+    return locality in VARNA_NEARBY_LOCALITIES
+
+
 def is_rent_listing(prop_type: str, price: "int | None", text: str) -> bool:
     """Обявата изглежда за под наем, не за продажба — по текст или по
     неправдоподобно ниска цена спрямо типа имот."""
@@ -1453,12 +1509,15 @@ def download_cover_photos(df: "pd.DataFrame"):
 
 
 def main():
+    staging_only = os.environ.get("SCRAPE_STAGING_ONLY", "0") == "1"
     all_rows = []
     scrape_report = build_report({
         "olx.bg": SCRAPE_OLX,
         "alo.bg": SCRAPE_ALO,
         "imot.bg": SCRAPE_IMOT,
     })
+    if staging_only:
+        scrape_report["scope"] = "partial"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -1542,6 +1601,13 @@ def main():
     if df.empty:
         df = pd.DataFrame(columns=COLS)
 
+    in_scope_source_counts = {"olx.bg": 0, "alo.bg": 0, "imot.bg": 0}
+    for row in all_rows:
+        source = site_from_link(str(row.get("Източник") or row.get("Линк") or ""))
+        location = normalize_location(str(row.get("Локация") or ""))
+        if source in in_scope_source_counts and is_in_varna_radar_scope(location):
+            in_scope_source_counts[source] += 1
+
     # Приоритет на извора при дедупликация между сайтове — печели по-надеждният
     # маркер за "Тип_продавач": OLX (филтър на ниво URL) > imot.bg (маркер
     # ".seller" в картата) > ALO.bg (само по ключови думи в името на подателя).
@@ -1607,13 +1673,23 @@ def main():
     # Левски 1 / Левски 2 / Левски → Левски)
     df["Локация"] = df["Локация"].map(normalize_location)
 
-    # Махаме обяви от Добрич — OLX от време на време връща резултати от там
-    # въпреки URL филтъра за Варна (region/location дрейф на техния search).
-    dobrich_mask = df["Локация"].fillna("").str.contains("добрич", case=False, regex=False)
-    n_dobrich = int(dobrich_mask.sum())
-    if n_dobrich:
-        print(f"\n🚫 Премахнати {n_dobrich} обяви от Добрич (извън обхвата на радара)")
-    df = df[~dobrich_mask].reset_index(drop=True)
+    # OLX /varna/ понякога връща и други населени места. Пазим само Варна-град,
+    # избраните курортни зони и близките местности от явния allowlist по-горе.
+    in_scope_mask = df["Локация"].fillna("").map(is_in_varna_radar_scope)
+    out_of_scope = df.loc[~in_scope_mask, "Локация"].fillna("").astype(str)
+    out_of_scope_counts = out_of_scope.value_counts()
+    scrape_report["out_of_scope_listings_removed"] = int((~in_scope_mask).sum())
+    scrape_report["out_of_scope_location_counts"] = {
+        str(location): int(count) for location, count in out_of_scope_counts.head(50).items()
+    }
+    if scrape_report["out_of_scope_listings_removed"]:
+        print(
+            f"\n🚫 Премахнати {scrape_report['out_of_scope_listings_removed']} обяви "
+            "извън Варна-град и включените курортни зони"
+        )
+        for location, count in out_of_scope_counts.head(10).items():
+            print(f"  извън обхвата: {location or '(липсва локация)'} — {count}")
+    df = df.loc[in_scope_mask].reset_index(drop=True)
 
     # Финален ред на колоните за CSV
     df["Локация-район"] = df["Локация"]
@@ -1652,6 +1728,7 @@ def main():
         if not enabled:
             continue
         entry = scrape_report["sites"][site]
+        entry["in_scope_listings"] = in_scope_source_counts[site]
         if entry["status"] == "успешен" and entry["listings"] == 0:
             update_site(scrape_report, site, "потвърдено празен",
                         listings=0)
@@ -1670,13 +1747,26 @@ def main():
         df,
         scrape_report,
         enabled_sites,
+        check_drop_threshold=not staging_only,
     )
-    write_diagnostics(scrape_report, validation_errors)
+    report_path = os.environ.get("SCRAPE_REPORT_PATH", "data/scrape_report.json")
+    write_diagnostics(scrape_report, validation_errors, path=report_path)
     if validation_errors:
         for error in validation_errors:
             print(f"\n❌ ВАЛИДАЦИЯ: {error}")
         print("\nПубликуването е отказано; предишните CSV, history и docs са запазени.")
         sys.exit(2)
+
+    if staging_only:
+        stage_output = os.environ.get("SCRAPE_STAGE_OUTPUT", "")
+        if not stage_output:
+            print("\n❌ Липсва SCRAPE_STAGE_OUTPUT за staging scrape.")
+            sys.exit(2)
+        df = df[[column for column in FINAL_COLUMNS if column in df.columns]]
+        atomic_write_csv(df, stage_output)
+        print(f"\n✅ Частичният обход е запазен временно: {len(df)} обяви → {stage_output}")
+        print("Не са променени CSV, history, снимки или dashboard.")
+        return
 
     df["Снимка_локална"] = download_cover_photos(df)
 

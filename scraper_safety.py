@@ -288,7 +288,8 @@ def write_diagnostics(report, validation_errors=None, path="data/scrape_report.j
 
 
 def validate_snapshot(df, report, enabled_sites,
-                      previous_full_path="data/last_full_snapshot.json"):
+                      previous_full_path="data/last_full_snapshot.json",
+                      check_drop_threshold=True):
     errors = []
     missing = [column for column in FINAL_COLUMNS if column not in df.columns]
     if missing:
@@ -300,7 +301,10 @@ def validate_snapshot(df, report, enabled_sites,
     for site, enabled in enabled_sites.items():
         if not enabled:
             continue
-        from_rows = int(report.get("sites", {}).get(site, {}).get("listings", 0))
+        site_report = report.get("sites", {}).get(site, {})
+        from_rows = int(site_report.get(
+            "in_scope_listings", site_report.get("listings", 0)
+        ))
         total = from_rows or (int(df["Източник"].fillna("").astype(str).str.contains(
             site.replace(".bg", r"\.bg"), case=False, regex=True
         ).sum()) if "Източник" in df.columns else 0)
@@ -322,7 +326,7 @@ def validate_snapshot(df, report, enabled_sites,
         except (OSError, ValueError, json.JSONDecodeError):
             previous_count = None
 
-    if previous_count and previous_count > 0:
+    if check_drop_threshold and previous_count and previous_count > 0:
         threshold = env_float("DROP_THRESHOLD_PERCENT", 30.0, 0.0)
         allowed = previous_count * (1.0 - threshold / 100.0)
         if len(df) < allowed:
