@@ -19,6 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 from scraper_safety import (
     FINAL_COLUMNS,
     apply_manual_corrections,
+    atomic_create_csv,
     atomic_write_csv,
     build_report,
     classify_unknown,
@@ -1774,8 +1775,13 @@ def main():
     df = df[[column for column in final_cols if column in df.columns]]
     atomic_write_csv(df, OUTPUT_FILE)
 
-    history_file = f"{HISTORY_DIR}/properties_varna_{date.today().isoformat()}.csv"
-    atomic_write_csv(df, history_file)
+    run_id = os.environ.get("GITHUB_RUN_ID") or time.strftime("%H%M%S")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    history_file = (
+        f"{HISTORY_DIR}/properties_varna_{date.today().isoformat()}"
+        f"_run-{run_id}-{run_attempt}.csv"
+    )
+    atomic_create_csv(df, history_file)
     mark_full_snapshot("data/last_full_snapshot.json", df)
     photo_stats = cleanup_expired_photos(
         df,

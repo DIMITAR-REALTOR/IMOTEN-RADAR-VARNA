@@ -77,7 +77,9 @@ def build_raw_and_meta(
     if not files:
         raise SystemExit(f"Няма history файлове в {HIST_DIR}")
     prefix = pattern.split("*", 1)[0]
-    file_dates = [os.path.basename(fp)[len(prefix):-4] for fp in files]
+    # Snapshot files can include a run ID so same-day runs never overwrite
+    # history. The first ten characters remain the calendar date.
+    file_dates = [os.path.basename(fp)[len(prefix):len(prefix) + 10] for fp in files]
     trend_months = set(sorted({fdate[:7] for fdate in file_dates})[-2:])
 
     listings = {}

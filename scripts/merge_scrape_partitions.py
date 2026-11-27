@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scraper import PHOTOS_DIR, download_cover_photos, site_from_link
 from scraper_safety import (
     FINAL_COLUMNS,
+    atomic_create_csv,
     atomic_write_csv,
     build_report,
     cleanup_expired_photos,
@@ -126,8 +128,13 @@ def main():
 
     df["Снимка_локална"] = download_cover_photos(df)
     atomic_write_csv(df, "data/properties_varna.csv")
-    history_file = f"data/history/properties_varna_{date.today().isoformat()}.csv"
-    atomic_write_csv(df, history_file)
+    run_id = os.environ.get("GITHUB_RUN_ID") or time.strftime("%H%M%S")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    history_file = (
+        f"data/history/properties_varna_{date.today().isoformat()}"
+        f"_run-{run_id}-{run_attempt}.csv"
+    )
+    atomic_create_csv(df, history_file)
     mark_full_snapshot("data/last_full_snapshot.json", df)
     photo_stats = cleanup_expired_photos(
         df,

@@ -208,6 +208,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@github.com"
           git add data/properties_varna.csv data/history/ data/photos/ docs/ data/manual_property_corrections.csv data/last_full_snapshot.json
+          history_changes="$(git diff --cached --name-status -- data/history/)"
+          if [[ -n "$history_changes" ]]; then
+            while IFS=$'\t' read -r status path; do
+              if [[ "$status" != "A" ]]; then
+                echo "ERROR: data/history is append-only; refusing $status $path"
+                exit 1
+              fi
+            done <<< "$history_changes"
+          fi
           if git diff --cached --quiet; then
             echo "Няма промени за публикуване"
           else

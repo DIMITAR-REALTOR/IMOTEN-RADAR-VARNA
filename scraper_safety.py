@@ -149,6 +149,22 @@ def atomic_write_csv(df, path):
             os.unlink(tmp_path)
 
 
+def atomic_create_csv(df, path):
+    """Atomically create an immutable CSV; fail instead of replacing a file."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".history-", suffix=".csv",
+                                    dir=os.path.dirname(path) or ".")
+    os.close(fd)
+    try:
+        df.to_csv(tmp_path, index=False, encoding="utf-8-sig")
+        # A hard link is atomic and fails if the destination already exists.
+        # Both paths are in the same directory/filesystem.
+        os.link(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 def atomic_write_text(path, text):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix=".radar-", suffix=".html",
@@ -389,7 +405,9 @@ def cleanup_expired_photos(df, photos_dir="data/photos",
             if not name.startswith("properties_varna_") or not name.endswith(".csv"):
                 continue
             try:
-                snapshot_date = date.fromisoformat(name[-14:-4])
+                # Supports immutable per-run names such as
+                # properties_varna_2026-11-27_run-123.csv.
+                snapshot_date = date.fromisoformat(name[len("properties_varna_"):len("properties_varna_") + 10])
             except (ValueError, TypeError):
                 continue
             path = os.path.join(history_dir, name)
