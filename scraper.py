@@ -849,6 +849,7 @@ def scrape_olx(context, report=None) -> list[dict]:
                 if report is not None:
                     record_page(report, "olx.bg", pass_name, current_page,
                                 MAX_OLX_PAGES, bool(cards))
+                    checkpoint_report(report, SCRAPE_REPORT_PATH)
                 if not cards:
                     if report is not None:
                         record_pass_stop(report, "olx.bg", pass_name,
@@ -923,7 +924,7 @@ def scrape_olx(context, report=None) -> list[dict]:
 
                         ppm = round(eur / sqm, 2) if eur and sqm else None
 
-                        rows.append({
+                        row = {
                             "Цена":        eur,
                             "Площ_квм":   sqm,
                             "Цена_на_квм": ppm,
@@ -941,13 +942,18 @@ def scrape_olx(context, report=None) -> list[dict]:
                             "Тип_сделка": deal_label,
                             "Ново_строителство": "YES" if is_new_build(desc_full) else "",
                             "От_инвеститор": "YES" if is_from_investor(desc_full) else "",
-                        })
+                        }
+                        rows.append(row)
+                        checkpoint_listing("olx.bg", pass_name, row)
                         if report is not None:
                             record_listing(report, "olx.bg", pass_name)
                     except Exception as e:
                         print(f"  OLX card грешка: {e}")
                         if report is not None:
                             record_parse_error(report, "olx.bg", pass_name)
+
+                if report is not None:
+                    checkpoint_report(report, SCRAPE_REPORT_PATH)
 
                 # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
                 # — не разчитаме на пагинационния бутон "напред".
@@ -1110,7 +1116,7 @@ def scrape_alo(context, report=None) -> list[dict]:
 
                         ppm = ppm or (round(eur / sqm, 2) if eur and sqm else None)
 
-                        rows.append({
+                        row = {
                             "Цена":        eur,
                             "Площ_квм":   sqm,
                             "Цена_на_квм": ppm,
@@ -1128,7 +1134,9 @@ def scrape_alo(context, report=None) -> list[dict]:
                             "Тип_сделка": deal_label,
                             "Ново_строителство": "YES" if is_new_build(desc_full) else "",
                             "От_инвеститор": "YES" if is_from_investor(desc_full, publisher) else "",
-                        })
+                        }
+                        rows.append(row)
+                        checkpoint_listing("alo.bg", pass_name, row)
                         if report is not None:
                             record_listing(report, "alo.bg", pass_name)
                     except Exception as e:
@@ -1136,6 +1144,8 @@ def scrape_alo(context, report=None) -> list[dict]:
                         if report is not None:
                             record_parse_error(report, "alo.bg", pass_name)
 
+                if report is not None:
+                    checkpoint_report(report, SCRAPE_REPORT_PATH)
                 if current_page >= MAX_ALO_PAGES:
                     if report is not None:
                         record_pass_stop(report, "alo.bg", pass_name, "page_limit_with_results")
@@ -1327,7 +1337,7 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
                     # тук разчита само на текста на описанието.
                     is_investor = is_from_investor(full_desc)
 
-                rows.append({
+                row = {
                     "Цена":        eur,
                     "Площ_квм":   sqm,
                     "Цена_на_квм": ppm,
@@ -1345,7 +1355,9 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
                     "Тип_сделка": deal_label,
                     "Ново_строителство": "YES" if is_new_build(full_desc) else "",
                     "От_инвеститор": "YES" if is_investor else "",
-                })
+                }
+                rows.append(row)
+                checkpoint_listing("imot.bg", pass_label, row)
                 page_count += 1
                 if report is not None:
                     record_listing(report, "imot.bg", pass_label)
@@ -1354,6 +1366,8 @@ def _scrape_imot_pages(page, context, base_url: str, deal_label: str, pass_label
                 if report is not None:
                     record_parse_error(report, "imot.bg", pass_label)
 
+        if report is not None:
+            checkpoint_report(report, SCRAPE_REPORT_PATH)
         print(f"  imot.bg/{pass_label}: {page_count} обяви на стр.{current_page}")
 
         # ЗАБЕЛЕЖКА: спираме САМО когато страницата няма карти (виж по-горе).
@@ -1421,9 +1435,36 @@ def scrape_imot(context, report=None) -> list[dict]:
 # СНИМКИ (само заглавна) — сваляне и локално съхранение в data/photos/
 # ══════════════════════════════════════════════════════════════════
 PHOTOS_DIR = "data/photos"
+CHECKPOINT_DIR = os.environ.get("SCRAPE_CHECKPOINT_DIR", "data/staging/checkpoints")
+SCRAPE_REPORT_PATH = os.environ.get("SCRAPE_REPORT_PATH", "data/scrape_report.json")
 MAX_NEW_PHOTOS_PER_RUN = int(os.environ.get("MAX_NEW_PHOTOS_PER_RUN", "400"))
 PHOTO_DOWNLOAD_TIMEOUT = 8
 PHOTO_MAX_BYTES = 700_000  # предпазна мярка срещу подозрително големи файлове
+
+
+def checkpoint_listing(site: str, pass_name: str, row: dict) -> None:
+    """Durably append each parsed listing so an interrupted pass keeps its data."""
+    site_dir = os.path.join(CHECKPOINT_DIR, site.replace(".", "_"))
+    os.makedirs(site_dir, exist_ok=True)
+    pass_slug = re.sub(r"[^A-Za-z0-9_-]+", "_", pass_name).strip("_")[:48] or "pass"
+    pass_hash = hashlib.sha1(pass_name.encode("utf-8")).hexdigest()[:10]
+    path = os.path.join(site_dir, f"{pass_slug}-{pass_hash}.jsonl")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def checkpoint_report(report, path):
+    """Refresh diagnostics after each completed result page while scrape runs."""
+    report["checkpoint_directory"] = CHECKPOINT_DIR
+    report["checkpoint_rows"] = sum(
+        int(pass_data.get("listings", 0))
+        for site_data in report.get("sites", {}).values()
+        for pass_data in site_data.get("passes", {}).values()
+    )
+    report["state"] = "running"
+    write_diagnostics(report, path=path, complete=False)
 
 
 def _photo_local_name(key: str) -> str:
@@ -1511,6 +1552,7 @@ def download_cover_photos(df: "pd.DataFrame"):
 
 def main():
     staging_only = os.environ.get("SCRAPE_STAGING_ONLY", "0") == "1"
+    report_path = SCRAPE_REPORT_PATH
     all_rows = []
     scrape_report = build_report({
         "olx.bg": SCRAPE_OLX,
@@ -1519,6 +1561,7 @@ def main():
     })
     if staging_only:
         scrape_report["scope"] = "partial"
+    checkpoint_report(scrape_report, report_path)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -1750,8 +1793,8 @@ def main():
         enabled_sites,
         check_drop_threshold=not staging_only,
     )
-    report_path = os.environ.get("SCRAPE_REPORT_PATH", "data/scrape_report.json")
-    write_diagnostics(scrape_report, validation_errors, path=report_path)
+    write_diagnostics(scrape_report, validation_errors, path=report_path,
+                      complete=not bool(validation_errors))
     if validation_errors:
         for error in validation_errors:
             print(f"\n❌ ВАЛИДАЦИЯ: {error}")

@@ -285,12 +285,13 @@ def record_parse_error(report, site, pass_name):
     entry["parse_errors"] += 1
 
 
-def write_diagnostics(report, validation_errors=None, path="data/scrape_report.json"):
+def write_diagnostics(report, validation_errors=None, path="data/scrape_report.json",
+                      complete=None):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     payload = dict(report)
     payload["finished_at"] = datetime.now().isoformat(timespec="seconds")
     payload["errors"] = list(validation_errors or [])
-    payload["complete"] = not bool(validation_errors)
+    payload["complete"] = (not bool(validation_errors)) if complete is None else bool(complete)
     fd, tmp_path = tempfile.mkstemp(prefix=".scrape-report-", suffix=".json",
                                     dir=os.path.dirname(path) or ".")
     os.close(fd)

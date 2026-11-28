@@ -52,6 +52,7 @@ jobs:
           SCRAPE_STAGING_ONLY: '1'
           SCRAPE_STAGE_OUTPUT: data/staging/non_olx.csv
           SCRAPE_REPORT_PATH: data/staging/non_olx_report.json
+          SCRAPE_CHECKPOINT_DIR: data/staging/checkpoints
           IMOT_EMAIL: ${{ secrets.IMOT_EMAIL }}
           IMOT_PASSWORD: ${{ secrets.IMOT_PASSWORD }}
           PYTHONUNBUFFERED: '1'
@@ -84,6 +85,15 @@ jobs:
             data/imot_*_debug.html
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Upload non-OLX listing checkpoints
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: scrape-checkpoints-non-olx
+          path: data/staging/checkpoints/
+          if-no-files-found: ignore
+          retention-days: 90
 
   scrape-olx:
     name: Обход OLX.bg (самостоятелен максимум)
@@ -124,6 +134,7 @@ jobs:
           SCRAPE_STAGING_ONLY: '1'
           SCRAPE_STAGE_OUTPUT: data/staging/olx.csv
           SCRAPE_REPORT_PATH: data/staging/olx_report.json
+          SCRAPE_CHECKPOINT_DIR: data/staging/checkpoints
           OLX_FETCH_PHONES: '0'
           PYTHONUNBUFFERED: '1'
           DROP_THRESHOLD_PERCENT: '30'
@@ -154,9 +165,76 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Upload OLX listing checkpoints
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: scrape-checkpoints-olx
+          path: data/staging/checkpoints/
+          if-no-files-found: ignore
+          retention-days: 90
+
+  archive-partial-checkpoints:
+    name: Архивиране на checkpoint-и при неуспешен обход
+    if: always()
+    needs: [scrape-non-olx, scrape-olx]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Download non-OLX checkpoints
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: scrape-checkpoints-non-olx
+          path: data/scrape_checkpoints/run-${{ github.run_id }}/non_olx
+
+      - name: Download OLX checkpoints
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: scrape-checkpoints-olx
+          path: data/scrape_checkpoints/run-${{ github.run_id }}/olx
+
+      - name: Archive partial listing data without replacing history
+        env:
+          NON_OLX_RESULT: ${{ needs.scrape-non-olx.result }}
+          OLX_RESULT: ${{ needs.scrape-olx.result }}
+        run: |
+          if [[ "$NON_OLX_RESULT" == "success" && "$OLX_RESULT" == "success" ]]; then
+            echo "Both scrape jobs succeeded; no partial checkpoint archive is needed."
+            exit 0
+          fi
+          archive="data/scrape_checkpoints/run-${GITHUB_RUN_ID}"
+          if ! find "$archive" -type f -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
+            echo "No parsed listing checkpoints were produced."
+            exit 0
+          fi
+          while IFS= read -r file; do
+            gzip -n "$file"
+          done < <(find "$archive" -type f -name '*.jsonl' -print)
+          git add -- "$archive"
+          changes="$(git diff --cached --name-status -- "$archive")"
+          while IFS=$'\t' read -r status path; do
+            [[ -z "$status" ]] && continue
+            if [[ "$status" != "A" ]]; then
+              echo "ERROR: checkpoint archive is append-only; refusing $status $path"
+              exit 1
+            fi
+          done <<< "$changes"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@github.com"
+          git commit -m "data: archive partial scrape ${GITHUB_RUN_ID}"
+          git push
+
   merge-and-publish:
     name: Обединяване, проверка и публикация
-    needs: [scrape-non-olx, scrape-olx]
+    needs: [scrape-non-olx, scrape-olx, archive-partial-checkpoints]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
