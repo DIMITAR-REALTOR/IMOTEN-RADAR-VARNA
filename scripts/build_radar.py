@@ -162,6 +162,20 @@ def build_raw_and_meta(
     latest_date = file_dates[-1]
     earliest_date = file_dates[0]
 
+    freshness_path = os.path.join(ROOT, "data", "source_snapshot_status.json")
+    source_status = {}
+    if os.path.exists(freshness_path):
+        try:
+            with open(freshness_path, encoding="utf-8") as fh:
+                source_status = json.load(fh).get("sources", {})
+        except (OSError, ValueError, json.JSONDecodeError):
+            source_status = {}
+    stale_hosts = {
+        {"olx.bg": "OLX.BG", "alo.bg": "ALO.BG", "imot.bg": "IMOT.BG"}[host]
+        for host, status in source_status.items()
+        if host in {"olx.bg", "alo.bg", "imot.bg"} and status.get("status") == "stale"
+    }
+
     raw = []
     for rec in listings.values():
         first_price = rec.pop("firstPrice")
@@ -172,13 +186,19 @@ def build_raw_and_meta(
         out = dict(rec)
         out["daysSpan"] = days_between(rec["firstSeen"], rec["lastSeen"])
         out["marketDays"] = days_between(rec["firstSeen"], latest_date) if rec["lastSeen"] == latest_date else out["daysSpan"]
-        out["active"] = rec["lastSeen"] == latest_date
-        out["isNew"] = rec["firstSeen"] == latest_date
+        out["staleSource"] = rec["src"] in stale_hosts
+        out["active"] = rec["lastSeen"] == latest_date and not out["staleSource"]
+        out["isNew"] = rec["firstSeen"] == latest_date and not out["staleSource"]
         out["drop"] = drop
         out["monthly"] = list(rec["monthly"].values())
         raw.append(out)
 
-    meta = {"earliest": earliest_date, "latest": latest_date, "runCount": len(files)}
+    meta = {
+        "earliest": earliest_date,
+        "latest": latest_date,
+        "runCount": len(files),
+        "sourceStatus": source_status,
+    }
     return raw, meta
 
 

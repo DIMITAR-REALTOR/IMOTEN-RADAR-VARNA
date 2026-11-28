@@ -13,6 +13,7 @@ import sys
 import json
 import base64
 import requests
+from urllib.parse import urlencode
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
@@ -23,7 +24,6 @@ from scraper_safety import (
     atomic_write_csv,
     build_report,
     classify_unknown,
-    cleanup_expired_photos,
     mark_full_snapshot,
     record_listing,
     record_page,
@@ -722,6 +722,111 @@ OLX_DEAL_PASSES = [
     ("naemi", "наем"),
 ]
 
+OLX_MAX_PRICE_EUR = 100_000_000
+OLX_SAFE_RESULT_COUNT_PER_PART = 960
+
+
+def olx_total_count(page) -> int | None:
+    """Read OLX's displayed result total when its page exposes one."""
+    try:
+        lines = page.locator("body").inner_text(timeout=5000).splitlines()[:35]
+    except Exception:
+        return None
+    number = r"([0-9][0-9\s\u00a0.,]*)"
+    patterns = (
+        re.compile(rf"(?:\d+\s*[-–]\s*\d+\s+)?(?:от|of)\s*{number}\s*(?:обяв\w*|резултат\w*|ads|results)?\s*$", re.I),
+        re.compile(rf"{number}\s+(?:обяви|обяви общо|резултата|резултати|ads|results)\b", re.I),
+    )
+    for line in lines:
+        for pattern in patterns:
+            match = pattern.search(line.strip())
+            if not match:
+                continue
+            digits = re.sub(r"\D", "", match.group(1))
+            if digits:
+                return int(digits)
+    return None
+
+
+def olx_price_url(base_url: str, price_range: tuple[int, int] | None) -> str:
+    if price_range is None:
+        return base_url
+    lower, upper = price_range
+    query = urlencode({
+        "search[filter_float_price:from]": lower,
+        "search[filter_float_price:to]": upper,
+    })
+    return f"{base_url}&{query}"
+
+
+def plan_olx_agency_price_ranges(page, base_url: str, page_limit: int):
+    """Probe OLX totals and recursively split only oversized agency searches."""
+    threshold = min(OLX_SAFE_RESULT_COUNT_PER_PART, max(1, int(page_limit * 40 * 0.8)))
+    try:
+        page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+        root_total = olx_total_count(page)
+        rand_sleep(0.5, 1)
+    except PwTimeout:
+        return [None], {"verified": False, "reason": "Не успях да прочета общия брой от OLX."}
+    if root_total is None:
+        return [None], {"verified": False, "reason": "OLX не показа разпознаваем общ брой обяви."}
+    if root_total <= threshold:
+        return [None], {
+            "verified": True,
+            "root_total": root_total,
+            "covered_total": root_total,
+            "parts": 1,
+            "reason": "Търсенето е под безопасния праг; ценово разделяне не е нужно.",
+        }
+
+    leaves = []
+    probes = 0
+    failed = []
+
+    def visit(lower: int, upper: int):
+        nonlocal probes
+        query_url = olx_price_url(base_url, (lower, upper))
+        try:
+            page.goto(query_url, wait_until="domcontentloaded", timeout=30000)
+            total = olx_total_count(page)
+            rand_sleep(0.5, 1)
+        except PwTimeout:
+            total = None
+        probes += 1
+        if total is None:
+            failed.append(f"OLX не показа брой за диапазона {lower}-{upper} EUR")
+            return
+        if total <= threshold:
+            leaves.append(((lower, upper), total))
+            return
+        if lower >= upper:
+            failed.append(f"Диапазонът {lower}-{upper} EUR остава над безопасния праг")
+            return
+        middle = (lower + upper) // 2
+        visit(lower, middle)
+        visit(middle + 1, upper)
+
+    visit(0, OLX_MAX_PRICE_EUR)
+    covered_total = sum(total for _, total in leaves)
+    gap_percent = abs(covered_total - root_total) / root_total * 100 if root_total else 0
+    verified = bool(leaves) and not failed and gap_percent <= 2
+    reason = "; ".join(failed)
+    if not reason and gap_percent > 2:
+        reason = (
+            f"Сборът на ценовите диапазони ({covered_total}) се различава от "
+            f"общия брой на OLX ({root_total}) с {gap_percent:.1f}% — възможни са "
+            "обяви без цена или припокриващи се/неподдържани филтри."
+        )
+    return [price_range for price_range, _ in leaves], {
+        "verified": verified,
+        "root_total": root_total,
+        "covered_total": covered_total,
+        "parts": len(leaves),
+        "probes": probes,
+        "gap_percent": round(gap_percent, 2),
+        "reason": reason,
+    }
+
 
 def scrape_olx(context, report=None) -> list[dict]:
     rows = []
@@ -830,150 +935,187 @@ def scrape_olx(context, report=None) -> list[dict]:
                 pass_page_limit = MAX_OLX_AGENCY_PAGES
             if pass_page_limit < 1:
                 continue
-            pass_name = f"{deal_label}/{seller_label}"
-            if report is not None:
-                record_pass_start(report, "olx.bg", pass_name)
-            base_url = (
+            base_search_url = (
                 f"https://www.olx.bg/nedvizhimi-imoti/{deal_path}/varna/"
                 f"?currency=EUR&search%5Bprivate_business%5D={private_business_qs}"
                 "&search%5Border%5D=created_at:desc"
             )
+            price_plan = [None]
+            coverage = {"verified": True}
+            if seller_label == "агенция":
+                price_plan, coverage = plan_olx_agency_price_ranges(
+                    page, base_search_url, pass_page_limit
+                )
+                if not coverage.get("verified"):
+                    print(f"  OLX/{deal_label}/агенция: диапазоните не са потвърдени: "
+                          f"{coverage.get('reason', 'неизвестна причина')}")
 
-            current_page = 1
-            while current_page <= pass_page_limit:
-                url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
-                print(f"  OLX/{deal_label}/{seller_label} стр.{current_page}")
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    # Скрол за lazy load
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
-                    rand_sleep(0.5, 1)
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    rand_sleep(1, 2)
-                except PwTimeout:
-                    print("  OLX: timeout")
-                    if report is not None:
-                        record_timeout(report, "olx.bg", pass_name, "timeout при зареждане на страница")
-                    break
-
-                cards = page.query_selector_all('[data-cy="l-card"]')
+            deal_rows_start = len(rows)
+            for part_index, price_range in enumerate(price_plan, start=1):
+                base_url = olx_price_url(base_search_url, price_range)
+                pass_name = f"{deal_label}/{seller_label}"
+                if price_range is not None:
+                    lower, upper = price_range
+                    pass_name += f"/цена-{lower}-{upper}"
                 if report is not None:
-                    record_page(report, "olx.bg", pass_name, current_page,
-                                pass_page_limit, bool(cards))
-                    checkpoint_report(report, SCRAPE_REPORT_PATH)
-                if not cards:
-                    if report is not None:
-                        record_pass_stop(report, "olx.bg", pass_name,
-                                         "празна първа страница" if current_page == 1 else "край на резултатите")
-                    # Спираме само когато страницата реално няма карти — не
-                    # разчитаме на бутона "напред" (виж бележката за imot.bg
-                    # по-долу: понякога липсва в отговора към бота дори когато
-                    # следваща страница има резултати; същият риск важи и тук).
-                    break
-
-                for card in cards:
+                    record_pass_start(report, "olx.bg", pass_name)
+                current_page = 1
+                while current_page <= pass_page_limit:
+                    url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
+                    print(f"  OLX/{deal_label}/{seller_label} стр.{current_page}")
                     try:
-                        link_el = card.query_selector('a[href*="/d/"]')
-                        link = link_el.get_attribute("href") if link_el else ""
-                        if not link:
+                        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        # Скрол за lazy load
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
+                        rand_sleep(0.5, 1)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        rand_sleep(1, 2)
+                    except PwTimeout:
+                        print("  OLX: timeout")
+                        if report is not None:
+                            record_timeout(report, "olx.bg", pass_name, "timeout при зареждане на страница")
+                        break
+
+                    cards = page.query_selector_all('[data-cy="l-card"]')
+                    if report is not None:
+                        record_page(report, "olx.bg", pass_name, current_page,
+                                    pass_page_limit, bool(cards))
+                        checkpoint_report(report, SCRAPE_REPORT_PATH)
+                    if not cards:
+                        if report is not None:
+                            record_pass_stop(report, "olx.bg", pass_name,
+                                             "празна първа страница" if current_page == 1 else "край на резултатите")
+                        # Спираме само когато страницата реално няма карти — не
+                        # разчитаме на бутона "напред" (виж бележката за imot.bg
+                        # по-долу: понякога липсва в отговора към бота дори когато
+                        # следваща страница има резултати; същият риск важи и тук).
+                        break
+
+                    for card in cards:
+                        try:
+                            link_el = card.query_selector('a[href*="/d/"]')
+                            link = link_el.get_attribute("href") if link_el else ""
+                            if not link:
+                                if report is not None:
+                                    record_parse_error(report, "olx.bg", pass_name)
+                                continue
+                            if not link.startswith("http"):
+                                link = "https://www.olx.bg" + link
+
+                            title_el = card.query_selector('[data-cy="ad-card-title"]')
+                            title = title_el.inner_text().strip() if title_el else ""
+
+                            price_el = card.query_selector('[data-testid="ad-price"]')
+                            price_raw = price_el.inner_text().strip() if price_el else ""
+
+                            loc_el = card.query_selector('[data-testid="location-date"]')
+                            loc_raw = loc_el.inner_text().strip() if loc_el else ""
+                            loc, date_raw = parse_olx_location_date(loc_raw)
+
+                            img_el = card.query_selector("img[src]")
+                            img = img_el.get_attribute("src") if img_el else ""
+
+                            eur = to_eur(price_raw)
+
+                            phone = ""
+                            sqm = None
+                            desc_full = title
+                            try:
+                                detail = context.new_page()
+                                detail.goto(link, wait_until="domcontentloaded", timeout=20000)
+                                rand_sleep(1, 2)
+
+                                detail_text = detail.inner_text("body")
+                                sqm = extract_sqm(f"{title} {detail_text}")
+
+                                # Детайлната страница съдържа изписаната от OLX локация.
+                                # Предпочитаме я пред текста на картата, който често е съкратен.
+                                detail_loc_el = detail.query_selector('[data-testid="location-date"]')
+                                if detail_loc_el:
+                                    detail_loc, detail_date = parse_olx_location_date(detail_loc_el.inner_text())
+                                    if detail_loc:
+                                        loc = detail_loc
+                                    if detail_date:
+                                        date_raw = detail_date
+
+                                # Забележка: тук НЕ ползваме широк ':has-text("Описание")' селектор —
+                                # той понякога захваща цялото меню/навигацията на страницата вместо
+                                # само описанието на обявата (оттам "Бизнеси, Стаи, Услуги" боклук в текста).
+                                desc_el = detail.query_selector('[data-cy="ad_description"], [data-testid="ad-description"]')
+                                if desc_el:
+                                    desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text()}"), 600)
+
+                                # Телефон — само ако сме влезли в акаунт
+                                if olx_logged_in:
+                                    phone = reveal_phone(detail)
+
+                                detail.close()
+                            except Exception:
+                                pass
+
+                            ppm = round(eur / sqm, 2) if eur and sqm else None
+
+                            row = {
+                                "Цена":        eur,
+                                "Площ_квм":   sqm,
+                                "Цена_на_квм": ppm,
+                                "Локация":    loc,
+                                "Описание":   desc_full,
+                                "Линк":       link,
+                                "Снимка_URL": img,
+                                "Дата_обява": date_raw,
+                                "Източник":   link,
+                                "ID_обява":   extract_id_from_url(link, "olx"),
+                                "Спешност":   is_urgent(desc_full),
+                                "Телефон":    phone,
+                                "Тип_имот":   detect_type(desc_full),
+                                "Тип_продавач": seller_label,
+                                "Тип_сделка": deal_label,
+                                "Ново_строителство": "YES" if is_new_build(desc_full) else "",
+                                "От_инвеститор": "YES" if is_from_investor(desc_full) else "",
+                            }
+                            rows.append(row)
+                            checkpoint_listing("olx.bg", pass_name, row)
+                            if report is not None:
+                                record_listing(report, "olx.bg", pass_name)
+                        except Exception as e:
+                            print(f"  OLX card грешка: {e}")
                             if report is not None:
                                 record_parse_error(report, "olx.bg", pass_name)
-                            continue
-                        if not link.startswith("http"):
-                            link = "https://www.olx.bg" + link
 
-                        title_el = card.query_selector('[data-cy="ad-card-title"]')
-                        title = title_el.inner_text().strip() if title_el else ""
-
-                        price_el = card.query_selector('[data-testid="ad-price"]')
-                        price_raw = price_el.inner_text().strip() if price_el else ""
-
-                        loc_el = card.query_selector('[data-testid="location-date"]')
-                        loc_raw = loc_el.inner_text().strip() if loc_el else ""
-                        loc, date_raw = parse_olx_location_date(loc_raw)
-
-                        img_el = card.query_selector("img[src]")
-                        img = img_el.get_attribute("src") if img_el else ""
-
-                        eur = to_eur(price_raw)
-
-                        phone = ""
-                        sqm = None
-                        desc_full = title
-                        try:
-                            detail = context.new_page()
-                            detail.goto(link, wait_until="domcontentloaded", timeout=20000)
-                            rand_sleep(1, 2)
-
-                            detail_text = detail.inner_text("body")
-                            sqm = extract_sqm(f"{title} {detail_text}")
-
-                            # Детайлната страница съдържа изписаната от OLX локация.
-                            # Предпочитаме я пред текста на картата, който често е съкратен.
-                            detail_loc_el = detail.query_selector('[data-testid="location-date"]')
-                            if detail_loc_el:
-                                detail_loc, detail_date = parse_olx_location_date(detail_loc_el.inner_text())
-                                if detail_loc:
-                                    loc = detail_loc
-                                if detail_date:
-                                    date_raw = detail_date
-
-                            # Забележка: тук НЕ ползваме широк ':has-text("Описание")' селектор —
-                            # той понякога захваща цялото меню/навигацията на страницата вместо
-                            # само описанието на обявата (оттам "Бизнеси, Стаи, Услуги" боклук в текста).
-                            desc_el = detail.query_selector('[data-cy="ad_description"], [data-testid="ad-description"]')
-                            if desc_el:
-                                desc_full = clean_text(strip_nav_junk(f"{title} | {desc_el.inner_text()}"), 600)
-
-                            # Телефон — само ако сме влезли в акаунт
-                            if olx_logged_in:
-                                phone = reveal_phone(detail)
-
-                            detail.close()
-                        except Exception:
-                            pass
-
-                        ppm = round(eur / sqm, 2) if eur and sqm else None
-
-                        row = {
-                            "Цена":        eur,
-                            "Площ_квм":   sqm,
-                            "Цена_на_квм": ppm,
-                            "Локация":    loc,
-                            "Описание":   desc_full,
-                            "Линк":       link,
-                            "Снимка_URL": img,
-                            "Дата_обява": date_raw,
-                            "Източник":   link,
-                            "ID_обява":   extract_id_from_url(link, "olx"),
-                            "Спешност":   is_urgent(desc_full),
-                            "Телефон":    phone,
-                            "Тип_имот":   detect_type(desc_full),
-                            "Тип_продавач": seller_label,
-                            "Тип_сделка": deal_label,
-                            "Ново_строителство": "YES" if is_new_build(desc_full) else "",
-                            "От_инвеститор": "YES" if is_from_investor(desc_full) else "",
-                        }
-                        rows.append(row)
-                        checkpoint_listing("olx.bg", pass_name, row)
-                        if report is not None:
-                            record_listing(report, "olx.bg", pass_name)
-                    except Exception as e:
-                        print(f"  OLX card грешка: {e}")
-                        if report is not None:
-                            record_parse_error(report, "olx.bg", pass_name)
-
-                if report is not None:
-                    checkpoint_report(report, SCRAPE_REPORT_PATH)
-
-                # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
-                # — не разчитаме на пагинационния бутон "напред".
-                if current_page >= pass_page_limit:
                     if report is not None:
-                        record_pass_stop(report, "olx.bg", pass_name, "page_limit_with_results")
-                    break
-                current_page += 1
-                rand_sleep(2, 3)
+                        checkpoint_report(report, SCRAPE_REPORT_PATH)
+
+                    # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
+                    # — не разчитаме на пагинационния бутон "напред".
+                    if current_page >= pass_page_limit:
+                        if report is not None:
+                            record_pass_stop(report, "olx.bg", pass_name, "page_limit_with_results")
+                        break
+                    current_page += 1
+                    rand_sleep(2, 3)
+
+            if seller_label == "агенция":
+                identifiers = {
+                    str(row.get("ID_обява") or row.get("Източник") or "")
+                    for row in rows[deal_rows_start:]
+                }
+                identifiers.discard("")
+                coverage["observed_unique"] = len(identifiers)
+                root_total = coverage.get("root_total")
+                if root_total:
+                    observed_gap = abs(len(identifiers) - root_total) / root_total * 100
+                    coverage["observed_gap_percent"] = round(observed_gap, 2)
+                    coverage["verified"] = bool(coverage.get("verified")) and observed_gap <= 2
+                    if observed_gap > 2 and not coverage.get("reason"):
+                        coverage["reason"] = (
+                            f"Събрани са {len(identifiers)} уникални обяви при "
+                            f"обявени от OLX {root_total} ({observed_gap:.1f}% разлика)."
+                        )
+                if report is not None:
+                    report["sites"]["olx.bg"].setdefault("agency_coverage", {})[
+                        deal_label
+                    ] = coverage
 
     page.close()
     print(f"  OLX: {len(rows)} обяви")
@@ -1806,12 +1948,6 @@ def main():
     )
     write_diagnostics(scrape_report, validation_errors, path=report_path,
                       complete=not bool(validation_errors))
-    if validation_errors:
-        for error in validation_errors:
-            print(f"\n❌ ВАЛИДАЦИЯ: {error}")
-        print("\nПубликуването е отказано; предишните CSV, history и docs са запазени.")
-        sys.exit(2)
-
     if staging_only:
         stage_output = os.environ.get("SCRAPE_STAGE_OUTPUT", "")
         if not stage_output:
@@ -1819,9 +1955,19 @@ def main():
             sys.exit(2)
         df = df[[column for column in FINAL_COLUMNS if column in df.columns]]
         atomic_write_csv(df, stage_output)
-        print(f"\n✅ Частичният обход е запазен временно: {len(df)} обяви → {stage_output}")
+        if validation_errors:
+            print("\n⚠️ Частичният резултат е запазен за source-aware merge; ")
+            print("пълният snapshot на този източник не е потвърден.")
+        else:
+            print(f"\n✅ Частичният обход е запазен временно: {len(df)} обяви → {stage_output}")
         print("Не са променени CSV, history, снимки или dashboard.")
         return
+
+    if validation_errors:
+        for error in validation_errors:
+            print(f"\n❌ ВАЛИДАЦИЯ: {error}")
+        print("\nПубликуването е отказано; предишните CSV, history и docs са запазени.")
+        sys.exit(2)
 
     df["Снимка_локална"] = download_cover_photos(df)
 
@@ -1837,17 +1983,9 @@ def main():
     )
     atomic_create_csv(df, history_file)
     mark_full_snapshot("data/last_full_snapshot.json", df)
-    photo_stats = cleanup_expired_photos(
-        df,
-        photos_dir=PHOTOS_DIR,
-        history_dir=HISTORY_DIR,
-        full_snapshot=True,
-        report_errors=[],
-    )
     print(
-        f"\n🖼️ Снимки — запазени: {photo_stats['saved']}, "
-        f"изтрити: {photo_stats['deleted']}"
-        + (f", бележка: {photo_stats['skipped']}" if photo_stats["skipped"] else "")
+        f"\n🖼️ Снимки — запазени: {len(df[df['Снимка_локална'].fillna('').astype(str) != ''])}; "
+        "автоматично изтриване е изключено."
     )
 
     print(
