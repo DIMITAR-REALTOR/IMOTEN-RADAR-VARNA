@@ -129,6 +129,8 @@ def row_to_property(row):
         "source_listing_id": (row.get("ID_обява") or "").strip() or listing_id_from_url(link),
         "source_url": link,
         "seller_type": normalize_seller_type(row.get("Тип_продавач")),
+        "seller_phone": (row.get("Телефон") or "").strip() or None,
+        "source_metadata": {str(key): value or "" for key, value in row.items()},
         "title": title,
         "description": description,
         "price_eur": price_eur,
@@ -279,6 +281,7 @@ def main():
     total_price_changes = 0
     total_rejected = 0
     total_existing_url_duplicates = 0
+    ingestion_failures = []
 
     for source, props in by_source.items():
         pending_batches = list(chunks(props))
@@ -292,7 +295,18 @@ def main():
                 resp = post_json(f"{api_url}/api/v1/market/import", source_payload, secret)
             except requests.RequestException as err:
                 print(f"ГРЕШКА при ingestion за {source}, партида {batch_no}: {err}")
-                return 5
+                ingestion_failures.append(f"{source} партида {batch_no}: мрежова грешка")
+                break
+            if resp.status_code in (400, 413) and len(batch) > 1:
+                midpoint = len(batch) // 2
+                pending_batches[batch_index:batch_index + 1] = [
+                    batch[:midpoint], batch[midpoint:]
+                ]
+                print(
+                    f"REMI върна HTTP {resp.status_code} за {source}, партида от {len(batch)} обяви; "
+                    "разделям я, за да продължа с валидните записи."
+                )
+                continue
             if resp.status_code == 413:
                 if len(batch) == 1:
                     listing_id = batch[0].get("source_listing_id") or "неизвестен ID"
@@ -300,15 +314,8 @@ def main():
                         f"ГРЕШКА: REMI отхвърли и единичната обява {listing_id} "
                         f"като твърде голям payload: {resp.text[:200]}"
                     )
-                    return 5
-                midpoint = len(batch) // 2
-                pending_batches[batch_index:batch_index + 1] = [
-                    batch[:midpoint], batch[midpoint:]
-                ]
-                print(
-                    f"REMI върна HTTP 413 за {source}, партида от {len(batch)} обяви; "
-                    "разделям я на по-малки партиди и повтарям."
-                )
+                    ingestion_failures.append(f"{source} listing {listing_id}: payload твърде голям")
+                    batch_index += 1
                 continue
             if resp.status_code == 401:
                 print("ГРЕШКА: неуспешна автентикация към REMI ingestion")
@@ -318,15 +325,21 @@ def main():
                     f"ГРЕШКА при ingestion за {source}, партида {batch_no}: "
                     f"HTTP {resp.status_code} {resp.text[:200]}"
                 )
-                return 5
+                ingestion_failures.append(f"{source} партида {batch_no}: HTTP {resp.status_code}")
+                batch_index += 1
+                continue
             try:
                 data = resp.json().get("data", {})
             except (ValueError, AttributeError):
                 print(f"ГРЕШКА: невалиден JSON от ingestion за {source}, партида {batch_no}")
-                return 5
+                ingestion_failures.append(f"{source} партида {batch_no}: невалиден JSON")
+                batch_index += 1
+                continue
             if not isinstance(data, dict) or data.get("received") != len(batch):
                 print(f"ГРЕШКА: REMI не потвърди всички записи от {source}, партида {batch_no}")
-                return 5
+                ingestion_failures.append(f"{source} партида {batch_no}: непълно потвърждение")
+                batch_index += 1
+                continue
             total_inserted += data.get("inserted", 0)
             total_updated += data.get("updated", 0)
             total_price_changes += data.get("price_changes", 0)
@@ -354,7 +367,7 @@ def main():
                     )
                 else:
                     print("Съпоставянето няма да бъде стартирано заради отхвърлени обяви.")
-                    return 5
+                    ingestion_failures.append(f"{source} партида {batch_no}: отхвърлени редове")
             batch_index += 1
 
     if skipped_invalid:
@@ -366,6 +379,13 @@ def main():
         f"промени на цените {total_price_changes}, отхвърлени {total_rejected}, "
         f"вече съществуващи URL дубликати {total_existing_url_duplicates}"
     )
+
+    if ingestion_failures:
+        print(
+            "Съпоставянето няма да бъде стартирано заради грешки при импорта; "
+            "останалите източници и партиди бяха обработени."
+        )
+        return 5
 
     if os.environ.get("REMI_SKIP_MATCHING", "").strip().lower() in {"1", "true", "yes"}:
         print("Съпоставянето е пропуснато по настройка на ограничен sync run.")
