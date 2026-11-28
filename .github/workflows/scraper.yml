@@ -46,6 +46,8 @@ jobs:
           MAX_ALO_PAGES: 20
           MAX_IMOT_PAGES: 40
           MAX_OLX_PAGES: 0
+          MAX_OLX_PRIVATE_PAGES: 0
+          MAX_OLX_AGENCY_PAGES: 0
           SCRAPE_ALO: '1'
           SCRAPE_IMOT: '1'
           SCRAPE_OLX: '0'
@@ -128,6 +130,8 @@ jobs:
           MAX_ALO_PAGES: 0
           MAX_IMOT_PAGES: 0
           MAX_OLX_PAGES: 65
+          MAX_OLX_PRIVATE_PAGES: 10
+          MAX_OLX_AGENCY_PAGES: 65
           SCRAPE_ALO: '0'
           SCRAPE_IMOT: '0'
           SCRAPE_OLX: '1'

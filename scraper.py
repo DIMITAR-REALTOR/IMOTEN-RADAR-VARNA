@@ -50,6 +50,8 @@ BROWSER_STORAGE_STATE_B64 = os.environ.get("BROWSER_STORAGE_STATE_B64", "")
 OUTPUT_FILE  = "data/properties_varna.csv"
 MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 MAX_OLX_PAGES = int(os.environ.get("MAX_OLX_PAGES", str(MAX_PAGES)))
+MAX_OLX_PRIVATE_PAGES = int(os.environ.get("MAX_OLX_PRIVATE_PAGES", str(MAX_OLX_PAGES)))
+MAX_OLX_AGENCY_PAGES = int(os.environ.get("MAX_OLX_AGENCY_PAGES", str(MAX_OLX_PAGES)))
 MAX_ALO_PAGES = int(os.environ.get("MAX_ALO_PAGES", str(MAX_PAGES)))
 MAX_IMOT_PAGES = int(os.environ.get("MAX_IMOT_PAGES", str(MAX_PAGES)))
 SCRAPE_ALO = os.environ.get("SCRAPE_ALO", "1") == "1"
@@ -816,9 +818,13 @@ def scrape_olx(context, report=None) -> list[dict]:
     ]
 
     for deal_path, deal_label in OLX_DEAL_PASSES:
-        if MAX_OLX_PAGES < 1:
-            continue
         for private_business_qs, seller_label in SELLER_PASSES:
+            pass_page_limit = (
+                MAX_OLX_PRIVATE_PAGES if seller_label == "частно лице"
+                else MAX_OLX_AGENCY_PAGES
+            )
+            if pass_page_limit < 1:
+                continue
             pass_name = f"{deal_label}/{seller_label}"
             if report is not None:
                 record_pass_start(report, "olx.bg", pass_name)
@@ -829,7 +835,7 @@ def scrape_olx(context, report=None) -> list[dict]:
             )
 
             current_page = 1
-            while current_page <= MAX_OLX_PAGES:
+            while current_page <= pass_page_limit:
                 url = base_url if current_page == 1 else f"{base_url}&page={current_page}"
                 print(f"  OLX/{deal_label}/{seller_label} стр.{current_page}")
                 try:
@@ -848,7 +854,7 @@ def scrape_olx(context, report=None) -> list[dict]:
                 cards = page.query_selector_all('[data-cy="l-card"]')
                 if report is not None:
                     record_page(report, "olx.bg", pass_name, current_page,
-                                MAX_OLX_PAGES, bool(cards))
+                                pass_page_limit, bool(cards))
                     checkpoint_report(report, SCRAPE_REPORT_PATH)
                 if not cards:
                     if report is not None:
@@ -957,7 +963,7 @@ def scrape_olx(context, report=None) -> list[dict]:
 
                 # ЗАБЕЛЕЖКА: спираме само когато страницата няма карти (виж по-горе)
                 # — не разчитаме на пагинационния бутон "напред".
-                if current_page >= MAX_OLX_PAGES:
+                if current_page >= pass_page_limit:
                     if report is not None:
                         record_pass_stop(report, "olx.bg", pass_name, "page_limit_with_results")
                     break
