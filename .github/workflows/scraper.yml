@@ -64,15 +64,45 @@ jobs:
           PHOTO_RETENTION_DAYS: '14'
         run: python -u scraper.py
 
+      - name: Summarize non-OLX scrape diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          path = Path("data/staging/non_olx_report.json")
+          if not path.exists():
+              print("Non-OLX report was not produced.")
+          else:
+              report = json.loads(path.read_text(encoding="utf-8"))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("## Non-OLX scrape diagnostics\n\n")
+                  for site, entry in report.get("sites", {}).items():
+                      summary.write(f"- **{site}**: {entry.get('status')}; "
+                                    f"{entry.get('listings', 0)} listings; "
+                                    f"{entry.get('pages', 0)} pages; "
+                                    f"limit={entry.get('limit_reached', False)}; "
+                                    f"timeouts={entry.get('timeouts', 0)}; "
+                                    f"parse errors={entry.get('parse_errors', 0)}\n")
+                      for deal, coverage in entry.get("agency_coverage", {}).items():
+                          summary.write(f"  - {deal}: {coverage.get('observed_unique', 0)} "
+                                        f"уникални / {coverage.get('root_total', 'неизвестен')} "
+                                        f"от OLX; verified={coverage.get('verified', False)}; "
+                                        f"{coverage.get('reason', '')}\n")
+                  for error in report.get("errors", []):
+                      summary.write(f"\n- ⚠️ {error}")
+          PY
+
       - name: Upload imot.bg + ALO.bg partition
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: scrape-non-olx
           path: |
             data/staging/non_olx.csv
             data/staging/non_olx_report.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 1
 
       - name: Upload non-OLX diagnostics
@@ -148,15 +178,45 @@ jobs:
           PHOTO_RETENTION_DAYS: '14'
         run: python -u scraper.py
 
+      - name: Summarize OLX scrape diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          path = Path("data/staging/olx_report.json")
+          if not path.exists():
+              print("OLX report was not produced.")
+          else:
+              report = json.loads(path.read_text(encoding="utf-8"))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("## OLX scrape diagnostics\n\n")
+                  for site, entry in report.get("sites", {}).items():
+                      summary.write(f"- **{site}**: {entry.get('status')}; "
+                                    f"{entry.get('listings', 0)} listings; "
+                                    f"{entry.get('pages', 0)} pages; "
+                                    f"limit={entry.get('limit_reached', False)}; "
+                                    f"timeouts={entry.get('timeouts', 0)}; "
+                                    f"parse errors={entry.get('parse_errors', 0)}\n")
+                      for deal, coverage in entry.get("agency_coverage", {}).items():
+                          summary.write(f"  - {deal}: {coverage.get('observed_unique', 0)} "
+                                        f"уникални / {coverage.get('root_total', 'неизвестен')} "
+                                        f"от OLX; verified={coverage.get('verified', False)}; "
+                                        f"{coverage.get('reason', '')}\n")
+                  for error in report.get("errors", []):
+                      summary.write(f"\n- ⚠️ {error}")
+          PY
+
       - name: Upload OLX partition
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: scrape-olx
           path: |
             data/staging/olx.csv
             data/staging/olx_report.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 1
 
       - name: Upload OLX diagnostics
@@ -240,6 +300,7 @@ jobs:
 
   merge-and-publish:
     name: Обединяване, проверка и публикация
+    if: always()
     needs: [scrape-non-olx, scrape-olx, archive-partial-checkpoints]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -256,16 +317,36 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Download imot.bg + ALO.bg partition
+        if: always()
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           name: scrape-non-olx
           path: data/staging
 
+      - name: Download non-OLX diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: scraper-diagnostics-non-olx
+          path: data/staging/diagnostics_non_olx
+
       - name: Download OLX partition
+        if: always()
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           name: scrape-olx
           path: data/staging
+
+      - name: Download OLX diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: scraper-diagnostics-olx
+          path: data/staging/diagnostics_olx
 
       - name: Merge, validate, and publish the full snapshot
         env:
@@ -292,6 +373,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@github.com"
           git add data/properties_varna.csv data/history/ data/photos/ docs/ data/manual_property_corrections.csv data/last_full_snapshot.json
+          git add data/source_snapshot_status.json
           data_changes="$(git diff --cached --name-status -- data/)"
           if [[ -n "$data_changes" ]]; then
             while IFS=$'\t' read -r status path; do

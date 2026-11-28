@@ -241,6 +241,7 @@
   .tag.new{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
   .tag.active{ background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
   .tag.gone{ background:color-mix(in srgb, var(--faint) 20%, transparent); color:var(--faint); }
+  .tag.stale{ background:color-mix(in srgb, var(--warn) 18%, transparent); color:var(--warn); }
   .tag.drop{ background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
   .tag.relisted{ background:color-mix(in srgb, var(--warn) 16%, transparent); color:var(--warn); }
   .tag.investor{ background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
@@ -315,7 +316,8 @@
     <div class="badge">
       IMOT.BG · OLX · ALO.BG<br>
       Обхванат период: <b id="run-range">—</b><br>
-      <b id="run-count">—</b> обхода обединени в тази таблица
+      <b id="run-count">—</b> обхода обединени в тази таблица<br>
+      <span id="source-freshness"></span>
     </div>
   </header>
 
@@ -676,6 +678,15 @@ function renderPool(){
     ? `${poolMeta.earliest} – ${poolMeta.latest}`
     : 'няма архивирани обходи';
   document.getElementById('run-count').textContent = poolMeta.runCount;
+  const sourceNames = {'olx.bg':'OLX', 'imot.bg':'imot.bg', 'alo.bg':'ALO.bg'};
+  const sourceEntries = Object.entries(poolMeta.sourceStatus || {});
+  document.getElementById('source-freshness').textContent = sourceEntries.length
+    ? 'Източници: ' + sourceEntries.map(([key, value]) =>
+        `${sourceNames[key] || key}: ${value.status === 'stale'
+          ? `СТАР SNAPSHOT (${value.snapshot_date || 'дата неизвестна'})`
+          : `обновен (${value.snapshot_date || 'днес'})`}`
+      ).join(' · ')
+    : '';
 
   // ── "изгодна оферта" / топ 3 (спрямо медиана €/кв.м за (тип+стаи)+район, само активни) ──
   (function computeDeals(){
@@ -1107,7 +1118,9 @@ function render(list){
     if (r._top3) tags.push('<span class="tag top3">ТОП 3 ИЗГОДНИ</span>');
     else if (r._deal) tags.push(`<span class="tag deal">ИЗГОДНА -${r._dealPct}%</span>`);
     const descText = (r.desc||'').replace(/\s*\.\.\.\s*$/,'…');
-    const statusTag = r.active
+    const statusTag = r.staleSource
+      ? '<span class="tag stale">ПОСЛЕДЕН ЗАПАЗЕН SNAPSHOT</span>'
+      : r.active
       ? '<span class="tag active">АКТИВНА</span>'
       : '<span class="tag gone">НЕ Е В ПОСЛЕДНИЯ</span>';
     const dropTag = r.drop ? `<span class="tag drop">${r.drop.pct}%</span>` : '';
