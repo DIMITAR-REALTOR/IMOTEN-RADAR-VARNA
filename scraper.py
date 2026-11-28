@@ -51,6 +51,9 @@ OUTPUT_FILE  = "data/properties_varna.csv"
 MAX_PAGES    = int(os.environ.get("MAX_PAGES", "25"))
 MAX_OLX_PAGES = int(os.environ.get("MAX_OLX_PAGES", str(MAX_PAGES)))
 MAX_OLX_PRIVATE_PAGES = int(os.environ.get("MAX_OLX_PRIVATE_PAGES", str(MAX_OLX_PAGES)))
+MAX_OLX_PRIVATE_RENT_PAGES = int(os.environ.get(
+    "MAX_OLX_PRIVATE_RENT_PAGES", str(MAX_OLX_PRIVATE_PAGES)
+))
 MAX_OLX_AGENCY_PAGES = int(os.environ.get("MAX_OLX_AGENCY_PAGES", str(MAX_OLX_PAGES)))
 MAX_ALO_PAGES = int(os.environ.get("MAX_ALO_PAGES", str(MAX_PAGES)))
 MAX_IMOT_PAGES = int(os.environ.get("MAX_IMOT_PAGES", str(MAX_PAGES)))
@@ -819,10 +822,12 @@ def scrape_olx(context, report=None) -> list[dict]:
 
     for deal_path, deal_label in OLX_DEAL_PASSES:
         for private_business_qs, seller_label in SELLER_PASSES:
-            pass_page_limit = (
-                MAX_OLX_PRIVATE_PAGES if seller_label == "частно лице"
-                else MAX_OLX_AGENCY_PAGES
-            )
+            if seller_label == "частно лице" and deal_label == "наем":
+                pass_page_limit = MAX_OLX_PRIVATE_RENT_PAGES
+            elif seller_label == "частно лице":
+                pass_page_limit = MAX_OLX_PRIVATE_PAGES
+            else:
+                pass_page_limit = MAX_OLX_AGENCY_PAGES
             if pass_page_limit < 1:
                 continue
             pass_name = f"{deal_label}/{seller_label}"
