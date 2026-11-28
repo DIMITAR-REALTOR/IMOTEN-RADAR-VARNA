@@ -292,6 +292,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@github.com"
           git add data/properties_varna.csv data/history/ data/photos/ docs/ data/manual_property_corrections.csv data/last_full_snapshot.json
+          data_changes="$(git diff --cached --name-status -- data/)"
+          if [[ -n "$data_changes" ]]; then
+            while IFS=$'\t' read -r status path; do
+              if [[ "$status" == "D" || "$status" == R* ]]; then
+                echo "ERROR: data is never deleted or renamed automatically; refusing $status $path"
+                exit 1
+              fi
+            done <<< "$data_changes"
+          fi
+          photo_changes="$(git diff --cached --name-status -- data/photos/)"
+          if [[ -n "$photo_changes" ]]; then
+            while IFS=$'\t' read -r status path; do
+              if [[ "$status" != "A" ]]; then
+                echo "ERROR: saved photos are immutable; refusing $status $path"
+                exit 1
+              fi
+            done <<< "$photo_changes"
+          fi
           history_changes="$(git diff --cached --name-status -- data/history/)"
           if [[ -n "$history_changes" ]]; then
             while IFS=$'\t' read -r status path; do

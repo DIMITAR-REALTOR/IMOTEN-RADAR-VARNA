@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -392,60 +392,10 @@ def cleanup_expired_photos(df, photos_dir="data/photos",
                            full_snapshot=True, report_errors=None,
                            retention_days=None, today=None):
     saved = int(len(df))
-    deleted = 0
-    if not photo_is_safe_to_cleanup(full_snapshot, report_errors or []):
-        return {"saved": saved, "deleted": 0, "skipped": "непълен или неуспешен обход"}
-
-    retention = env_int("PHOTO_RETENTION_DAYS", 14, 1) if retention_days is None else retention_days
-    today = today or date.today()
-    cutoff = today - timedelta(days=retention)
-
-    listing_history = {}
-    if os.path.isdir(history_dir):
-        for name in sorted(os.listdir(history_dir)):
-            if not name.startswith("properties_varna_") or not name.endswith(".csv"):
-                continue
-            try:
-                # Supports immutable per-run names such as
-                # properties_varna_2026-11-27_run-123.csv.
-                snapshot_date = date.fromisoformat(name[len("properties_varna_"):len("properties_varna_") + 10])
-            except (ValueError, TypeError):
-                continue
-            path = os.path.join(history_dir, name)
-            with open(path, encoding="utf-8-sig", newline="") as handle:
-                for row in csv.DictReader(handle):
-                    listing_id = stable_listing_id(row)
-                    if not listing_id:
-                        continue
-                    item = listing_history.setdefault(
-                        listing_id, {"last_seen": date.min, "photos": set()}
-                    )
-                    item["last_seen"] = max(item["last_seen"], snapshot_date)
-                    local_path = str(row.get("Снимка_локална") or "").strip()
-                    if local_path:
-                        item["photos"].add(local_path)
-
-    active_ids = {stable_listing_id(row) for _, row in df.iterrows()}
-    expired_paths = set()
-    for listing_id, item in listing_history.items():
-        if listing_id in active_ids or item["last_seen"] > cutoff:
-            continue
-        expired_paths.update(item["photos"])
-
-    for local_path in expired_paths:
-        if not os.path.isabs(local_path):
-            local_path = os.path.join(
-                photos_dir,
-                os.path.basename(os.path.normpath(local_path)),
-            )
-        photos_root = os.path.realpath(photos_dir)
-        local_path = os.path.realpath(local_path)
-        try:
-            if os.path.commonpath([photos_root, local_path]) != photos_root:
-                continue
-        except ValueError:
-            continue
-        if os.path.isfile(local_path):
-            os.unlink(local_path)
-            deleted += 1
-    return {"saved": saved, "deleted": deleted, "skipped": ""}
+    # Historical images are user data. Never remove them automatically; any
+    # retention cleanup requires an explicit, reviewed user decision.
+    return {
+        "saved": saved,
+        "deleted": 0,
+        "skipped": "автоматичното изтриване на снимки е изключено",
+    }
